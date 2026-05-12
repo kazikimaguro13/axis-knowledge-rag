@@ -1,0 +1,13 @@
+.git
+.gitignore
+_ai_workspace
+docs
+__pycache__
+*.pyc
+*.egg-info
+.chromadb
+.env
+node_modules
+.next
+.venv
+venv
