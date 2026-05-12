@@ -2,13 +2,12 @@
 
 ## [Unreleased]
 
-### Day 5 (2026-05-12)
-- streamlit_app.py: Streamlit UI with sidebar axis filters, question input, RAG answer, and result cards with `★ cited` badges
-- backend/src/config.py: `load_axes_config()` helper to load axes definition from config.yml
-- Dependencies: streamlit>=1.37.0 added to requirements.txt and pyproject.toml
-- UI: `st.cache_resource` for SearchEngine / RAGPipeline (1-shot init), `st.cache_data` for axes config
-- DUMMY mode: UI works without API keys (ANTHROPIC_API_KEY / GEMINI_API_KEY unset)
-- Note: `engine._store.count()` accesses private attribute — Week 2 candidate for `VectorStore.store_count()` public API
+### Day 10 (2026-05-12)
+- backend/src/integrity.py: IntegrityChecker with broken_refs, orphan_docs, cycle detection
+- backend/src/integrity.py: CLI entrypoint (`python -m backend.src.integrity`) with --json and --strict flags
+- backend/tests/test_integrity.py: 5 tests covering no-error, broken refs, orphans, cycles, self-loops
+- scripts/build_index.py: --strict-integrity flag aborts index build on broken refs
+- docs/integrity.md: architecture explanation, CLI usage, FAQ, future roadmap
 
 ### Day 4 (2026-05-12)
 - backend/src/rag.py: RAGPipeline (Claude API + DUMMY fallback) with citation extraction via `[doc_NNN]` regex
