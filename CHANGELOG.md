@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Day 8 (2026-05-12)
+- backend/src/normalizer.py: normalize_text (NFKC + カタカナ→ひらがな + lowercase) + Normalizer クラス
+- backend/src/normalizer.py: NormalizerOptions (frozen dataclass) で各ステップを on/off 制御
+- backend/tests/test_normalizer.py: 16 ケース全 PASS (assert-based, python -m で実行)
+- config.yml: normalization.lowercase: true を追加
+- docs/normalizer.md: 正規化パイプラインの仕組み・適用範囲・制限を解説
+- 標準ライブラリのみ実装 (unicodedata + 自前 code point shift)、追加依存ゼロ
+
 ### Day 4 (2026-05-12)
 - backend/src/rag.py: RAGPipeline (Claude API + DUMMY fallback) with citation extraction via `[doc_NNN]` regex
 - backend/src/rag.py: CLI entrypoint (`python -m backend.src.rag`) with axis filters
