@@ -21,9 +21,32 @@ def main(argv: list[str]) -> int:
     parser.add_argument("knowledge_dir", type=Path)
     parser.add_argument("--reset", action="store_true", help="Drop existing collection first")
     parser.add_argument("--db-path", type=Path, default=settings.chroma_db_path)
+    parser.add_argument(
+        "--strict-integrity",
+        action="store_true",
+        help="Abort index build if broken refs are detected",
+    )
     args = parser.parse_args(argv[1:])
 
+    import yaml
+
+    try:
+        with open("config.yml", encoding="utf-8") as f:
+            config = yaml.safe_load(f) or {}
+    except FileNotFoundError:
+        config = {}
+
     docs = load_directory(args.knowledge_dir)
+
+    if args.strict_integrity or config.get("integrity", {}).get("fail_on_broken", False):
+        from backend.src.integrity import IntegrityChecker, format_report
+
+        report = IntegrityChecker().check(docs)
+        if report.has_errors:
+            print(format_report(report), file=sys.stderr)
+            print("Integrity check failed. Aborting.", file=sys.stderr)
+            return 1
+
     if not docs:
         print("No documents found.", file=sys.stderr)
         return 1
