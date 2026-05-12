@@ -2,13 +2,13 @@
 
 ## [Unreleased]
 
-### Day 8 (2026-05-12)
-- backend/src/normalizer.py: normalize_text (NFKC + カタカナ→ひらがな + lowercase) + Normalizer クラス
-- backend/src/normalizer.py: NormalizerOptions (frozen dataclass) で各ステップを on/off 制御
-- backend/tests/test_normalizer.py: 16 ケース全 PASS (assert-based, python -m で実行)
-- config.yml: normalization.lowercase: true を追加
-- docs/normalizer.md: 正規化パイプラインの仕組み・適用範囲・制限を解説
-- 標準ライブラリのみ実装 (unicodedata + 自前 code point shift)、追加依存ゼロ
+### Day 5 (2026-05-12)
+- streamlit_app.py: Streamlit UI with sidebar axis filters, question input, RAG answer, and result cards with `★ cited` badges
+- backend/src/config.py: `load_axes_config()` helper to load axes definition from config.yml
+- Dependencies: streamlit>=1.37.0 added to requirements.txt and pyproject.toml
+- UI: `st.cache_resource` for SearchEngine / RAGPipeline (1-shot init), `st.cache_data` for axes config
+- DUMMY mode: UI works without API keys (ANTHROPIC_API_KEY / GEMINI_API_KEY unset)
+- Note: `engine._store.count()` accesses private attribute — Week 2 candidate for `VectorStore.store_count()` public API
 
 ### Day 4 (2026-05-12)
 - backend/src/rag.py: RAGPipeline (Claude API + DUMMY fallback) with citation extraction via `[doc_NNN]` regex
