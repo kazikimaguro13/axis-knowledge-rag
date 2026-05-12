@@ -2,12 +2,10 @@
 
 ## [Unreleased]
 
-### Day 10 (2026-05-12)
-- backend/src/integrity.py: IntegrityChecker with broken_refs, orphan_docs, cycle detection
-- backend/src/integrity.py: CLI entrypoint (`python -m backend.src.integrity`) with --json and --strict flags
-- backend/tests/test_integrity.py: 5 tests covering no-error, broken refs, orphans, cycles, self-loops
-- scripts/build_index.py: --strict-integrity flag aborts index build on broken refs
-- docs/integrity.md: architecture explanation, CLI usage, FAQ, future roadmap
+
+
+
+
 
 ### Day 4 (2026-05-12)
 - backend/src/rag.py: RAGPipeline (Claude API + DUMMY fallback) with citation extraction via `[doc_NNN]` regex
