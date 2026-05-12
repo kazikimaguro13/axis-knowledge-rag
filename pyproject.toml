@@ -21,6 +21,8 @@ dependencies = [
   "python-frontmatter>=1.1.0",
   "python-dotenv>=1.0.0",
   "pyyaml>=6.0",
+  "google-generativeai>=0.7.0",
+  "chromadb>=0.5.0",
 ]
 
 [project.urls]
