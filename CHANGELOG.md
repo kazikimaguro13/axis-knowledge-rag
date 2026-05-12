@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Day 11 (2026-05-13)
+- backend/src/marker.py: AUTO_GENERATED block handling — extract_blocks, update_block, strip_blocks, validate_balance
+- backend/src/marker.py: CLI entrypoint (`python -m backend.src.marker`) with --list / --update / --strip / --validate modes
+- backend/tests/test_marker.py: 31 tests covering extract, update, strip, validate, nested DOTALL, CRLF, CLI modes
+- examples/knowledge/01-rag-patterns.md: demo AUTO_GENERATED summary block (placeholder for Day 13 build script)
+- docs/marker.md: design rationale, ASCII diagram, API reference, CLI usage, recommended block names
+
 ### Day 10 (2026-05-12)
 - backend/src/integrity.py: IntegrityChecker with broken_refs, orphan_docs, cycle detection
 - backend/src/integrity.py: CLI entrypoint (`python -m backend.src.integrity`) with --json and --strict flags
