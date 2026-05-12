@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Day 3 (2026-05-12)
+- backend/src/search.py: SearchEngine (hybrid axis+vector search) with SearchResult dataclass
+- backend/src/search.py: CLI entrypoint (`python -m backend.src.search`)
+- backend/tests/test_search.py: 8 integration tests using in-memory VectorStore + force_dummy Embedder
+- Verified: Chroma 0.5 `$and` multi-key filter works correctly
+- Note: score=0.0 in DUMMY mode is expected (hash-derived embeddings have near-zero cosine similarity)
+
 ### Day 2 (2026-05-12)
 - backend/src/embedder.py: Gemini text-embedding-004 wrapper with deterministic dummy fallback (CI / offline dev)
 - backend/src/vector_store.py: ChromaDB PersistentClient wrapper (axis-aware metadata flattening)
