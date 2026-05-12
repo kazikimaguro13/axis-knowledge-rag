@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "axis-knowledge-rag"
+version = "0.1.0.dev0"
+description = "Axis-based search + RAG over YAML frontmatter Markdown knowledge (Local-first OSS)"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.11"
+authors = [{ name = "Nakashima" }]
+keywords = ["rag", "vector-search", "markdown", "knowledge-base", "local-first"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Programming Language :: Python :: 3.11",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+]
+dependencies = [
+  "python-frontmatter>=1.1.0",
+  "python-dotenv>=1.0.0",
+  "pyyaml>=6.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/kazikimaguro13/axis-knowledge-rag"
+Repository = "https://github.com/kazikimaguro13/axis-knowledge-rag"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["backend*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"

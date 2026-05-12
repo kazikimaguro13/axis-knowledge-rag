@@ -1,0 +1,26 @@
+axes:
+  - name: category
+    type: enum
+    values: ["技術記事", "メモ", "議事録", "ToDo"]
+    required: true
+  - name: topic
+    type: string
+    required: true
+  - name: level
+    type: enum
+    values: ["初級", "中級", "上級"]
+    required: false
+  - name: author
+    type: string
+    required: false
+  - name: year
+    type: integer
+    required: false
+
+normalization:
+  nfkc: true
+  katakana_to_hiragana: true
+
+integrity:
+  check_refs: true
+  fail_on_broken: false
