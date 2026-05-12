@@ -20,6 +20,7 @@ axes:
 normalization:
   nfkc: true
   katakana_to_hiragana: true
+  lowercase: true
 
 integrity:
   check_refs: true
