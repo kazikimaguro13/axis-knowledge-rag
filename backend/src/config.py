@@ -9,6 +9,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+COLLECTION_NAME = "axis_knowledge"
+
 
 @dataclass(frozen=True)
 class Settings:
