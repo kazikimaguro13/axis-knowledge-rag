@@ -34,3 +34,14 @@ def configure_logging(level: str | None = None) -> None:
 
 
 settings = Settings()
+
+
+def load_axes_config(path: Path | None = None) -> dict:
+    """Load axes definition from config.yml."""
+    import yaml
+
+    config_path = path or Path("./config.yml")
+    if not config_path.exists():
+        return {"axes": []}
+    with open(config_path, encoding="utf-8") as f:
+        return yaml.safe_load(f) or {"axes": []}
