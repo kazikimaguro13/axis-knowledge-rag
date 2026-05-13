@@ -1,5 +1,7 @@
 # axis-knowledge-rag
 
+<!-- ![demo](./examples/screenshots/demo.gif) -->
+
 YAML frontmatter 付き Markdown ナレッジに対する、**軸メタデータ検索 + ベクトル検索 + RAG** のローカル Web アプリ OSS。
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -12,8 +14,7 @@ YAML frontmatter 付き Markdown ナレッジに対する、**軸メタデータ
 
 ---
 
-> 📹 **Demo**: 録画は未公開 (近日追加予定)。動作確認は [Quickstart](#-quickstart-docker) を参照。
-> 撮影手順は [📸 デモ GIF 取得チェックリスト](#-デモ-gif-取得チェックリスト) を参照。
+> 📹 **Demo GIF**: coming soon. 動作確認は [Quickstart](#-quickstart-docker) を参照。
 
 ---
 
@@ -288,24 +289,6 @@ docker compose exec backend env | grep -E "ANTHROPIC|GEMINI"
 
 ChromaDB は Windows ネイティブ環境で segfault する既知の問題がある。
 WSL2 (Ubuntu) 環境に移行して実行することを推奨。
-
----
-
-## 📸 デモ GIF 取得チェックリスト
-
-中島さんが Day 20 中に手動で撮る:
-
-- [ ] `docker compose up` で backend + frontend 起動
-- [ ] OBS Studio or ScreenToGif (Windows) で録画開始 (1280x720, 30fps 推奨)
-- [ ] `http://localhost:3000` でブラウザ画面を全画面表示
-- [ ] サイドバーで `category=技術記事` を選択
-- [ ] 質問入力: 「RAG アーキテクチャの設計判断は?」
-- [ ] 検索ボタン押下、回答が typewriter で表示される
-- [ ] 出典 `[doc_001]` をクリックして該当カードへスクロール
-- [ ] 録画停止 (8〜15 秒を目安)
-- [ ] GIF 化、`examples/screenshots/demo.gif` として保存 (5MB 以下目安、超える場合は 854x480 に落とす)
-- [ ] README の `<!-- DEMO_GIF_HERE -->` 行を削除
-- [ ] 念のため `main-view.png` / `with-answer.png` のスクショも撮る
 
 ---
 
