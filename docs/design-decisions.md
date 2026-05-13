@@ -591,6 +591,56 @@ standalone ディレクトリを生成するようにする。
 
 ---
 
+## ADR-016: BM25 を加えて 3-way hybrid 検索にする
+
+- **Date**: 2026-05-14
+- **Status**: Accepted
+- **Deciders**: 中島
+
+### Context
+
+v0.5 までの hybrid 検索は **(a) 軸フィルタ + (b) ベクトル類似度** の 2-way 構成だった。
+ベクトル検索は意味的近接に強い一方、**固有名詞 / 厳密な単語マッチ** に弱い。例えば
+"ChromaDB" を検索するとベクトル空間上で「データベース」「ベクトルストア」と近接し、
+本命のドキュメントが top_k に入らないことがある。
+
+採用面接などで「BM25 と組み合わせていますか?」と聞かれた時に「ベクトルだけです」と
+答えるのは v0.6 でカバーしたい、というモチベーションもある。
+
+### Decision
+
+- `rank_bm25.BM25Okapi` を採用し、in-memory に BM25 index を保持
+- トークナイザは **正規化済みテキストの文字 n-gram (n=1, 2)** で済ます (MeCab / Sudachi の
+  辞書配布を避ける)
+- 軸フィルタで候補を絞った後の vector top_k と BM25 score を **weighted sum** で fusion:
+  `final = (1 - bm25_weight) * cosine + bm25_weight * bm25_norm`
+- BM25 score は **min-max 正規化** で `[0, 1]` に揃え、cosine と直接合算できるようにする
+- `bm25_weight=0.5` をデフォルト、`SearchInput` / CLI から上書き可
+- `bm25_weight=0.0` は **完全に v0.5 互換** (vector only)、後方互換を保つ
+- vector 側は fusion 時に over-fetch (`max(top_k*2, 20)`) して BM25 が再ランクできる
+  候補を確保する
+
+### Consequences
+
+- ✅ 固有名詞 / 厳密語彙マッチが強くなる
+- ✅ ベクトルだけだと埋もれる希少語が浮上する
+- ✅ `bm25_weight` で「ベクトル寄り / BM25 寄り」を 1 スカラーで説明できる
+  (RRF より直感的)
+- ❌ BM25 index がメモリに乗る (1000 docs で MB オーダー、無視できる)
+- ❌ ingester で文書追加時に index 再構築が必要 (永続化は v0.7 で検討)
+- ❌ 文字 n-gram は形態素ベース BM25 より精度が劣る (依存最小化とのトレードオフ、許容)
+
+### Alternatives Considered
+
+- **SPLADE / ColBERT**: sparse-dense 学習モデル。実装重く v1.0 候補
+- **Elasticsearch / OpenSearch**: 外部依存、Local-first の方針に反する
+- **形態素解析 (MeCab / Sudachi)**: 辞書配布で初期セットアップが重くなる
+- **RRF (Reciprocal Rank Fusion)**: score 値が直感的でなく、UI/API での説明が
+  難しい。重み付き和の方が「半々で混ぜる」「7:3 で固有名詞重視」と直接表現できる
+  ので採用
+
+---
+
 ## ADR の追加・改訂ルール
 
 1. **追加**: 末尾に `ADR-NNN` で連番。Date / Status / Deciders を書き、5 セクション (Context / Decision / Consequences / Alternatives / Status) を埋める
