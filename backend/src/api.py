@@ -48,10 +48,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     _state.clear()
 
 
+def _pkg_version() -> str:
+    try:
+        return version("axis-knowledge-rag")
+    except PackageNotFoundError:
+        return "unknown"
+
+
 app = FastAPI(
     title="axis-knowledge-rag",
     description="軸検索 + RAG over YAML frontmatter Markdown",
-    version="0.3.0.dev0",
+    version=_pkg_version(),
     lifespan=lifespan,
     docs_url="/api/docs",
     redoc_url="/api/redoc",
@@ -68,13 +75,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-def _pkg_version() -> str:
-    try:
-        return version("axis-knowledge-rag")
-    except PackageNotFoundError:
-        return "unknown"
 
 
 def _to_payload(r: SearchResult) -> SearchResultPayload:
