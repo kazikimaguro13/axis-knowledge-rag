@@ -3,10 +3,12 @@
 YAML frontmatter 付き Markdown ナレッジに対する、**軸メタデータ検索 + ベクトル検索 + RAG** のローカル Web アプリ OSS。
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/Version-0.4.0-brightgreen.svg)](#ロードマップ)
+[![Version](https://img.shields.io/badge/Version-0.5.0-brightgreen.svg)](#ロードマップ)
 [![Python: 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
 [![Next.js](https://img.shields.io/badge/Next.js-14-black.svg)](https://nextjs.org/)
-[![Status: v0.4](https://img.shields.io/badge/Status-v0.4-orange.svg)](#ロードマップ)
+[![Status: v0.5 A grade](https://img.shields.io/badge/Status-v0.5--A_grade-brightgreen.svg)](#ロードマップ)
+[![CI](https://github.com/kazikimaguro13/axis-knowledge-rag/actions/workflows/ci.yml/badge.svg)](https://github.com/kazikimaguro13/axis-knowledge-rag/actions/workflows/ci.yml)
+[![Docker Build](https://github.com/kazikimaguro13/axis-knowledge-rag/actions/workflows/docker.yml/badge.svg)](https://github.com/kazikimaguro13/axis-knowledge-rag/actions/workflows/docker.yml)
 
 ---
 

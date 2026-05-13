@@ -20,7 +20,7 @@ cd axis-knowledge-rag
 
 # (任意) リリースタグを手元に取り込む — clone 直後はタグが未取得の場合がある
 git fetch --tags origin
-git tag -l                       # v0.1.0 〜 v0.4.0 が表示されれば OK
+git tag -l                       # v0.1.0 〜 v0.5.0 が表示されれば OK
 
 # 環境変数ファイルを作成 (API キーは optional)
 cp .env.example .env

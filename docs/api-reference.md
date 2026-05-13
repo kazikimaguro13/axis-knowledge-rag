@@ -19,7 +19,7 @@ Interactive docs (Swagger UI): `http://localhost:8000/api/docs`
 ```json
 {
   "status": "ok",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "embedder_mode": "DUMMY",
   "rag_mode": "DUMMY"
 }
