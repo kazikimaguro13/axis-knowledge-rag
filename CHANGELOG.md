@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Day 19 (2026-05-13) — Docker 分割 (backend / frontend) + E2E (spec_019)
+- Dockerfile.backend: 新規。`python:3.11-slim`、`pip install -e .`、`EXPOSE 8000`、`HEALTHCHECK` で `/api/health` を 10s 間隔ポーリング、CMD で `scripts.build_index` → `uvicorn backend.src.api:app --host 0.0.0.0 --port 8000`
+- Dockerfile.frontend: 新規。multi-stage build (`node:20-alpine` AS builder → AS runner)、`NEXT_TELEMETRY_DISABLED=1`、Next.js standalone output を runner にコピー、非 root user `nextjs:1001` で `node server.js` 起動 (`EXPOSE 3000`)
+- frontend/next.config.mjs: `output: "standalone"` + `reactStrictMode: true` を追加 (Docker runtime のスリム化のため)
+- docker-compose.yml: 旧 `app` 単一サービスから `backend` + `frontend` の 2 サービス構成に書き直し。`backend` は `healthcheck` で `/api/health` を監視、`frontend` は `depends_on: condition: service_healthy` で backend ready を待ってから起動。ChromaDB は named volume `chroma-data` に永続化
+- Dockerfile → Dockerfile.streamlit: 旧 Week 1 単一 Dockerfile を rename して retreat 用に保持 (採用面接で Week 1 → Week 3 進化の説明に使う)
+- .dockerignore: monorepo 向けに更新 — `frontend/node_modules`、`frontend/.next`、`.env.local`、`*.md` (除く README/CHANGELOG) を追加
+- frontend/.dockerignore: 新規。`node_modules` / `.next` / `out` / `.env*.local` を除外
+
 ### Day 18 (2026-05-13) — AnswerPanel + 疑似ストリーミング + 出典リンク (spec_018)
 - frontend/src/components/SkeletonLoader.tsx: 新規。`animate-pulse` ベースの汎用スケルトン
 - frontend/src/components/AnswerPanel.tsx: 新規。`/api/answer` レスポンス表示用 — typewriter 風 pseudo-streaming (setInterval, 25ms 間隔 / 80 等分 step)、`[doc_NNN]` 正規表現で出典を `<a href="#doc_NNN">` に変換、`aria-live="polite"`、loading/error/empty 各 state、DUMMY mode / model 表示
