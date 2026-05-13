@@ -5,12 +5,16 @@ from pathlib import Path
 
 from backend.src.embedder import Embedder
 from backend.src.loader import Document
+from backend.src.normalizer import Normalizer
 from backend.src.search import SearchEngine, SearchResult, _build_where
 from backend.src.vector_store import VectorStore
 
 
-def _make_doc(doc_id: str, category: str, body: str = "body text") -> Document:
-    return Document(
+def _make_doc(
+    doc_id: str, category: str, body: str = "body text",
+    normalizer: Normalizer | None = None,
+) -> Document:
+    doc = Document(
         id=doc_id,
         title=f"Title {doc_id}",
         axes={"category": category, "level": "中級"},
@@ -20,19 +24,27 @@ def _make_doc(doc_id: str, category: str, body: str = "body text") -> Document:
         path=Path(f"/tmp/{doc_id}.md"),
         raw_meta={},
     )
+    if normalizer is not None:
+        doc.normalized_title = normalizer(doc.title)
+        doc.normalized_body = normalizer(doc.body)
+        doc.normalized_axes = {k: normalizer(str(v)) for k, v in doc.axes.items()}
+        doc.normalized_tags = [normalizer(t) for t in doc.tags]
+    return doc
 
 
 def _setup() -> tuple[VectorStore, Embedder, SearchEngine]:
+    normalizer = Normalizer()
     store = VectorStore(in_memory=True)
+    store.reset()  # Chroma EphemeralClient はプロセス内で状態を共有するため毎回 reset
     embedder = Embedder(force_dummy=True)
     docs = [
-        _make_doc("d1", "技術記事", "RAGとはRetrieval-Augmented Generationの略です"),
-        _make_doc("d2", "技術記事", "ベクトル検索はコサイン類似度を用います"),
-        _make_doc("d3", "メモ", "今日の会議メモ: プロジェクト進捗確認"),
+        _make_doc("d1", "技術記事", "RAGとはRetrieval-Augmented Generationの略です", normalizer),
+        _make_doc("d2", "技術記事", "ベクトル検索はコサイン類似度を用います", normalizer),
+        _make_doc("d3", "メモ", "今日の会議メモ: プロジェクト進捗確認", normalizer),
     ]
-    embeddings = embedder.embed_batch([d.body for d in docs])
+    embeddings = embedder.embed_batch([d.normalized_body for d in docs])
     store.upsert_many(docs, embeddings)
-    return store, embedder, SearchEngine(store, embedder)
+    return store, embedder, SearchEngine(store, embedder, normalizer)
 
 
 def test_query_no_filter_returns_all() -> None:
