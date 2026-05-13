@@ -12,6 +12,8 @@ from typing import Any
 
 import frontmatter
 
+from backend.src.normalizer import Normalizer
+
 logger = logging.getLogger(__name__)
 
 
@@ -32,6 +34,10 @@ class Document:
         body: The Markdown body (without frontmatter).
         path: Source file path on disk.
         raw_meta: Full frontmatter dict for debugging / extension.
+        normalized_title: NFKC + kana + lowercase 適用後の title (search 用)。
+        normalized_body: 同上の body。embedder にはこれを渡す。
+        normalized_axes: 各軸の値を normalize したもの (UI 表示は生の axes 側)。
+        normalized_tags: 各 tag を normalize したもの。
     """
 
     id: str
@@ -42,10 +48,18 @@ class Document:
     body: str
     path: Path
     raw_meta: dict[str, Any] = field(default_factory=dict)
+    normalized_title: str = ""
+    normalized_body: str = ""
+    normalized_axes: dict[str, str] = field(default_factory=dict)
+    normalized_tags: list[str] = field(default_factory=list)
 
 
-def load_document(path: Path) -> Document:
-    """Load a single Markdown file with YAML frontmatter."""
+def load_document(path: Path, normalizer: Normalizer | None = None) -> Document:
+    """Load a single Markdown file with YAML frontmatter.
+
+    If a Normalizer is provided, the `normalized_*` fields are populated.
+    Otherwise they remain empty (Day 1 behavior, kept for back-compat).
+    """
     if not path.exists():
         raise LoaderError(f"File not found: {path}")
     if not path.is_file():
@@ -62,7 +76,7 @@ def load_document(path: Path) -> Document:
     if "title" not in meta:
         raise LoaderError(f"Missing required 'title' field in {path}")
 
-    return Document(
+    doc = Document(
         id=str(meta["id"]),
         title=str(meta["title"]),
         axes=dict(meta.get("axes", {})),
@@ -72,10 +86,20 @@ def load_document(path: Path) -> Document:
         path=path,
         raw_meta=dict(meta),
     )
+    if normalizer is not None:
+        doc.normalized_title = normalizer(doc.title)
+        doc.normalized_body = normalizer(doc.body)
+        doc.normalized_axes = {k: normalizer(str(v)) for k, v in doc.axes.items()}
+        doc.normalized_tags = [normalizer(t) for t in doc.tags]
+    return doc
 
 
 def load_directory(
-    dir_path: Path, *, pattern: str = "*.md", strict: bool = False
+    dir_path: Path,
+    *,
+    pattern: str = "*.md",
+    strict: bool = False,
+    normalizer: Normalizer | None = None,
 ) -> list[Document]:
     """Load all Markdown files under a directory (non-recursive by default).
 
@@ -102,7 +126,7 @@ def load_directory(
 
     for f in files:
         try:
-            docs.append(load_document(f))
+            docs.append(load_document(f, normalizer=normalizer))
         except LoaderError as e:
             if strict:
                 raise
