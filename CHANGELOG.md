@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Day 27 (2026-05-13) — MCP error sanitization (内部情報漏洩防止) (spec_027)
+
+- mcp_server/_errors.py: 新規 — `make_error_response()` + `new_correlation_id()` (5 char UUID hex)
+- mcp_server/server.py: 全 6 tool の except 節を `make_error_response()` 呼び出しに統一。`axis_list_axes` は既存 try/except なしだったので追加
+- mcp_server/server.py: `_CorrFormatter` を `configure_logging()` 直後に設定 — `[%(levelname)s] corr=%(corr_id)s %(name)s: %(message)s` フォーマット。`corr_id` 未付与の record は `-----` でフォールバック
+- Internal exception details (file path, API error body, Pydantic input echo, ChromaDB fragment) を MCP client に露出させない設計に統一
+- mcp_server/tests/test_server.py: `test_axis_search_error_is_sanitized` (caplog で full exception がログに残ることも確認) + `test_all_tools_error_sanitized` (全 6 tool を parametrize、ZeroDivisionError が戻り値に含まれないことを検証)
+- docs/mcp-server.md: Error handling セクション (§4) 追加、既存セクション番号を繰り下げ、ファイル構成・テストカバレッジ表を更新 (21 → 28 tests)
+
 ### Day 25 (2026-05-13) — Doc 整合性パス (v0.4 メタデータ統一) (spec_025)
 - pyproject.toml: `version` を `0.1.0.dev0` → `0.4.0` に更新 (実体に追従)
 - backend/src/api.py: `FastAPI(version=...)` を `_pkg_version()` 経由の動的取得に変更。`_pkg_version()` を `FastAPI(...)` 直前に移動。`/api/health` の version レスポンスも自動的に `0.4.0` を返すように
