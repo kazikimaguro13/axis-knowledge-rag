@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Day 16 (2026-05-13)
+- frontend/: bootstrap Next.js 14.2.35 (App Router) + TypeScript strict + Tailwind 3.4 + ESLint via `create-next-app@14 --typescript --tailwind --eslint --app --src-dir --import-alias "@/*" --use-npm`
+- frontend/src/app/layout.tsx: 共通レイアウト + ヘッダーナビ (検索 / 設定), `lang="ja"`, Tailwind utility ベース
+- frontend/src/app/page.tsx: 検索画面 (Day 17 で SearchBar / AxisFilter / ResultCard 実装予定の placeholder)
+- frontend/src/app/settings/page.tsx: 設定画面 placeholder (将来 config.yml 編集 UI)
+- frontend/src/lib/api.ts: FastAPI 用 typed fetcher — `api.health/axes/search/answer`, `NEXT_PUBLIC_API_BASE` env で URL 切替
+- frontend/src/components/.gitkeep: Day 17 用ディレクトリ確保
+- frontend/.env.local.example: `NEXT_PUBLIC_API_BASE=http://localhost:8000`
+- .gitignore: `frontend/.env.local`, `frontend/.env*.local` を ignore, `!frontend/.env.local.example` で example のみ commit 許可
+- docs/architecture.md: Frontend セクション (§7) 追加 — ディレクトリ・スタック・API 連携図・開発フロー
+- 動作確認: `npm run lint` ✓ no warnings, `npm run build` ✓ (3 routes static, First Load JS 87.4kB), `npm run dev` → `/` `/settings` ともに HTTP 200
+
 ### Day 15 (2026-05-13)
 - backend/src/schemas.py: Pydantic v2 schemas — HealthResponse, AxisDef, AxesResponse, SearchRequest, SearchResultPayload, SearchResponse, AnswerRequest, AnswerResponse
 - backend/src/api.py: FastAPI app with lifespan init (SearchEngine + RAGPipeline 1回のみ), 4 endpoints: GET /api/health, GET /api/axes, POST /api/search, POST /api/answer

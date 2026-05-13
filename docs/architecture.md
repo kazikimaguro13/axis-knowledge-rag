@@ -283,7 +283,68 @@ build → install → build_index → streamlit run
 
 ---
 
-## 7. 拡張ポイント (Week 2 以降)
+## 7. Frontend (Next.js, Day 16〜)
+
+Day 16 で `frontend/` 配下に Next.js 14 (App Router) + TypeScript + Tailwind の土台を導入した。
+当面は Streamlit UI と並存し、Week 3 末で Streamlit を廃止予定。
+
+### ディレクトリ
+
+```
+frontend/
+├── src/
+│   ├── app/
+│   │   ├── layout.tsx            # 共通レイアウト + ナビ
+│   │   ├── page.tsx              # 検索画面 (Day 17 で実装)
+│   │   ├── settings/page.tsx     # 設定画面 (将来: 軸定義編集 UI)
+│   │   └── globals.css
+│   ├── components/               # Day 17 で SearchBar / AxisFilter / ResultCard
+│   └── lib/
+│       └── api.ts                # FastAPI クライアント (typed fetcher)
+├── tailwind.config.ts
+├── tsconfig.json
+├── next.config.mjs
+├── package.json
+└── .env.local.example            # NEXT_PUBLIC_API_BASE=http://localhost:8000
+```
+
+### スタック / 設計判断
+
+- **App Router** (pages router は不使用)、TypeScript strict
+- **Tailwind 3.x**、追加 CSS-in-JS ライブラリなし
+- **状態管理ライブラリ不採用** — `useState` / `Context` で十分 (採用担当者に「シンプルに保てる判断」をアピール)
+- **API クライアントは `fetch` 直叩き** — axios の interceptor 等は不要、薄いラッパー (`src/lib/api.ts`) で型だけ縛る
+- **環境変数**: `NEXT_PUBLIC_API_BASE` で FastAPI の URL を切替 (本番デプロイ時に差し替える)
+
+### バックエンドとの繋がり
+
+```
+Browser
+   │  fetch(NEXT_PUBLIC_API_BASE + /api/...)
+   ▼
+Next.js (port 3000)  ────────────►  FastAPI (port 8000)
+   src/lib/api.ts                    backend/src/api.py
+   ├─ api.health()                   GET  /api/health
+   ├─ api.axes()                     GET  /api/axes
+   ├─ api.search({...})              POST /api/search
+   └─ api.answer({...})              POST /api/answer
+```
+
+CORS は FastAPI 側で `localhost:3000` を許可済み (Day 15)。
+
+### 開発フロー
+
+```bash
+# backend
+uvicorn backend.src.api:app --reload --port 8000
+
+# frontend (別ターミナル)
+cd frontend && npm run dev  # → http://localhost:3000
+```
+
+---
+
+## 8. 拡張ポイント (Week 2 以降)
 
 | 拡張 | 触る場所 | 想定バージョン |
 |---|---|---|
