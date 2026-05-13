@@ -104,6 +104,37 @@ class VectorStore:
             where=where,
         )
 
+    def list_with_filter(
+        self,
+        *,
+        where: dict[str, Any] | None = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        """List documents by axis filter with pagination — no top_k cap.
+
+        Backed by ChromaDB's `collection.get()`, which does not require a
+        query embedding (unlike `query()`) and accepts arbitrary limit/offset.
+        Returns the raw Chroma payload (`ids`, `metadatas`, `documents`).
+        """
+        return self._collection.get(
+            where=where,
+            include=["metadatas", "documents"],
+            limit=limit,
+            offset=offset,
+        )
+
+    def count_with_filter(self, where: dict[str, Any] | None = None) -> int:
+        """Count documents matching the filter.
+
+        Uses `collection.get(include=[])` so only IDs are fetched. For an
+        unfiltered total, `count()` is cheaper; this is the filtered variant.
+        """
+        if where is None:
+            return self._collection.count()
+        result = self._collection.get(where=where, include=[])
+        return len(result.get("ids", []))
+
     def reset(self) -> None:
         """Drop and recreate the collection. Useful for rebuilding."""
         with contextlib.suppress(Exception):

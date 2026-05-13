@@ -44,3 +44,9 @@ class IngestOptions(BaseModel):
         description="Hint to bias Claude's category choice (e.g. '議事録').",
     )
     max_tokens: int = Field(default=1500, ge=512, le=4096)
+    retry_count: int = Field(
+        default=2,
+        description="Number of retries when Claude returns invalid JSON (0 disables retry).",
+        ge=0,
+        le=5,
+    )

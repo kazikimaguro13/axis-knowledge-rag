@@ -71,10 +71,17 @@ Ingester は Claude API を使ってこの変換を自動化します。
 - **`rag.py` のクライアント生成パターンを再利用** — `ANTHROPIC_API_KEY` 未設定 →
   DUMMY モード (`force_dummy=True` でも強制可) で決定論的な mock を返すので、
   CI / オフライン開発・テストで API キー不要。
-- **`_next_doc_id` を毎回計算** — `examples/knowledge/` を走査して最大番号 + 1 を返す。
-  バッチ処理 (`yamlize_dir`) では in-memory counter で衝突回避。
+- **`_scan_knowledge_dir` で 1 回スキャンに統合** — `examples/knowledge/` を 1 回走査して
+  `(next_doc_id, existing_doc_ids)` を同時に返す。spec_026 以前は `_next_doc_id` と
+  `_existing_doc_ids` がそれぞれ `load_directory()` を呼んでおり、ingest 1 回ごとに
+  frontmatter を 2 回 parse していた。バッチ処理 (`yamlize_dir`) では in-memory counter
+  で衝突回避。
 - **コードフェンス除去フォールバック** — Claude が稀に `\`\`\`json ... \`\`\`` で
   ラップして返した場合に備え、`_strip_code_fence` で吸収。
+- **JSON リトライ機構** — Claude が偶発的に非 JSON を返した場合、`retry_count`
+  (default 2) 回まで再試行する。再試行時の user_msg には前回の失敗理由 (例外型 +
+  メッセージ) を `# previous_attempt_failed` ブロックとして添えて、Claude が自己修正
+  できるようにフィードバックする。
 
 ---
 
@@ -158,10 +165,13 @@ hallucinated ref ID は `ValidationError` で弾かれます。
 
 - **長文メモ** (max_tokens 1500 を超えるサイズ) は途中で切れる可能性あり。`--max-tokens 4096` で拡張可能。
 - **refs 推測は保守的** — 確信が無いものは `[]` で返ってきます。手動補足してください。
-- **大規模 KB での next_id 計算が重い** — `load_directory` で全 doc を読むため、数千件規模では
-  数秒かかります。v0.5 で ChromaDB から id 一覧を取得する高速版に置換予定。
-- **retry 機構なし** — Claude が JSON 以外を返した場合は `RuntimeError`。`_strip_code_fence`
-  でフェンス付きには耐性がありますが、それ以上の修復は v0.5 で。
+- **大規模 KB での next_id 計算が重い** — `_scan_knowledge_dir` で全 doc を読むため、
+  数千件規模では数秒かかります (spec_026 でスキャン回数は 2 回 → 1 回に削減済み)。
+  v0.5 で ChromaDB から id 一覧を取得する高速版に置換予定。
+- **JSON リトライは前回エラーフィードバック方式** — `retry_count` (default 2) 回まで
+  自動再投入。再試行毎に `# previous_attempt_failed` ブロックを user_msg に付与して
+  Claude に自己修正を促します。それでも JSON 化できない場合は `RuntimeError` で fail。
+  `retry_count=0` で従来の即時 fail 挙動に戻せます。
 - **DUMMY モードは形式上の動作確認のみ** — 実 ingestion には `ANTHROPIC_API_KEY` が必須です。
 
 ---
@@ -172,7 +182,6 @@ hallucinated ref ID は `ValidationError` で弾かれます。
 - **Apple Notes インポート** — `osascript` 経由でメモを抜き出して一括変換
 - **batch + review UI** — Next.js 側に「raw メモを貼り付け → 変換プレビュー → 一括 commit」フロー
 - **複数 LLM 対応** — Anthropic / OpenAI / ローカル LLM をスイッチ可能に
-- **retry & repair** — 不正 JSON が返った時に自動再投入
 
 ---
 
