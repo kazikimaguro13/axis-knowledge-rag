@@ -1,0 +1,3 @@
+# This directory is intentionally empty.
+# Next.js's standalone output Dockerfile copies /app/public into the runner stage,
+# so the directory must exist (even if empty) for the build to succeed.
