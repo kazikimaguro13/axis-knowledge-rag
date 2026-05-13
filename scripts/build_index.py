@@ -9,9 +9,10 @@ import argparse
 import sys
 from pathlib import Path
 
-from backend.src.config import configure_logging, settings
+from backend.src.config import configure_logging, load_axes_config, settings
 from backend.src.embedder import Embedder
 from backend.src.loader import load_directory
+from backend.src.normalizer import Normalizer
 from backend.src.vector_store import VectorStore
 
 
@@ -36,7 +37,8 @@ def main(argv: list[str]) -> int:
     except FileNotFoundError:
         config = {}
 
-    docs = load_directory(args.knowledge_dir)
+    normalizer = Normalizer.from_config(load_axes_config())
+    docs = load_directory(args.knowledge_dir, normalizer=normalizer)
 
     if args.strict_integrity or config.get("integrity", {}).get("fail_on_broken", False):
         from backend.src.integrity import IntegrityChecker, format_report
@@ -56,7 +58,9 @@ def main(argv: list[str]) -> int:
         store.reset()
 
     embedder = Embedder()
-    embeddings = embedder.embed_batch([d.body for d in docs])
+    # body そのものではなく normalize 済みテキストを embed する。
+    # 同じ semantic で書き方が異なる文書を近い位置に配置するため。
+    embeddings = embedder.embed_batch([d.normalized_body for d in docs])
     store.upsert_many(docs, embeddings)
 
     print(f"Indexed {len(docs)} documents into {args.db_path}")
