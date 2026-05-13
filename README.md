@@ -219,7 +219,6 @@ updated: 2026-05-12
 | [Design Decisions](docs/design-decisions.md) | 主要な設計判断 (ADR) 15 件 |
 | [API Reference](docs/api-reference.md) | HTTP エンドポイント仕様 (FastAPI) |
 | [Deployment Guide](docs/deployment.md) | Docker / Fly.io / Cloud Run デプロイ手順 |
-| [Portfolio Notes](docs/portfolio-notes.md) | ES / 履歴書記述用素材集 |
 | [Documentation Index](docs/INDEX.md) | `docs/` 全体の目次 |
 
 機能ごとの詳細: [normalizer](docs/normalizer.md) / [integrity](docs/integrity.md) / [marker](docs/marker.md)
@@ -291,5 +290,5 @@ WSL2 (Ubuntu) 環境に移行して実行することを推奨。
 - License: [MIT](LICENSE)
 - Author: 中島 (GitHub: [@kazikimaguro13](https://github.com/kazikimaguro13))
 
-> 就活ポートフォリオ兼、個人ナレッジ運用ツールとして開発中。  
+> 個人ナレッジ運用ツールとして開発中。
 > Streamlit (レガシー UI) と Next.js (メイン UI) の 2 種類の UI が試せる独自設計です。

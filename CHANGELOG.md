@@ -37,7 +37,6 @@
 - docs/design-decisions.md: ADR-013 (疑似ストリーミング typewriter)、ADR-014 (Streamlit を deprecated せず残す)、ADR-015 (Docker multi-stage frontend slim 化) を追加
 - docs/api-reference.md: 全 4 endpoint を最終版に整備 — エラーレスポンス仕様、全フィールド説明、起動方法追記
 - docs/deployment.md: 新規 — Local Docker / ChromaDB バックアップ / Fly.io / Cloud Run / TLS プロキシ / CI/CD 構成
-- docs/portfolio-notes.md: 新規 — ES / 履歴書記述用素材集 (使用技術 / 成果物概要 / 工夫した点 / 数字まとめ / 面接 Q&A)
 
 ### Day 15 (2026-05-13)
 - backend/src/schemas.py: Pydantic v2 schemas — HealthResponse, AxisDef, AxesResponse, SearchRequest, SearchResultPayload, SearchResponse, AnswerRequest, AnswerResponse

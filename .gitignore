@@ -71,3 +71,6 @@ frontend/.env*.local
 *.swo
 .DS_Store
 Thumbs.db
+
+# build artifacts
+*.egg-info/
