@@ -30,6 +30,20 @@ def _flatten_axes(axes: dict[str, Any]) -> dict[str, str | int | float | bool]:
     return out
 
 
+def _flatten_axes_with_norm(
+    axes: dict[str, Any], normalized: dict[str, str]
+) -> dict[str, str | int | float | bool]:
+    """`_flatten_axes` の出力に `axis_<key>_norm` を併記したもの。
+
+    生の値は UI 表示 / debug 用に残しつつ、normalize 後の値を where 句で
+    使えるように別キーで持つ。
+    """
+    out = _flatten_axes(axes)
+    for k, v in normalized.items():
+        out[f"axis_{k}_norm"] = v
+    return out
+
+
 class VectorStore:
     """ChromaDB-backed store for Document embeddings + axis metadata."""
 
@@ -49,10 +63,12 @@ class VectorStore:
         """Insert or update a single Document + embedding."""
         metadata: dict[str, Any] = {
             "title": doc.title,
+            "title_norm": doc.normalized_title,
             "path": str(doc.path),
             "tags": ",".join(doc.tags),
+            "tags_norm": ",".join(doc.normalized_tags),
             "refs": ",".join(doc.refs),
-            **_flatten_axes(doc.axes),
+            **_flatten_axes_with_norm(doc.axes, doc.normalized_axes),
         }
         self._collection.upsert(
             ids=[doc.id],
