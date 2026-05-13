@@ -1,0 +1,33 @@
+2026-05-13 axis-knowledge-rag 週次 MTG 議事録
+
+参加: 中島、Claude (dev-b)
+時間: 19:00 - 19:45
+
+## 議題
+
+1. spec_022 (MCP server) の振り返り
+2. spec_023 (AI ingester) の方針確認
+3. v0.5 ロードマップ
+
+## 決定事項
+
+- MCP server は read-only 5 tools で merge 済み。ingestion 系は別 spec に切り出し
+- ingester は DUMMY モード必須。CI で API キーなしで動くこと
+- Pydantic で AI レスポンスを strict validation。hallucinated ref を弾くため
+- 軸推測は config.yml の axes 定義を Claude に渡して制約 prompt で縛る
+- 単発 CLI / バッチ CLI / MCP tool の 3 形態で提供
+
+## TODO
+
+- 中島: README に Ingester セクション追加 → done in spec_023
+- Claude: ingester.py 実装、テスト、ドキュメント
+- 来週: Slack 連携 (v0.5) の方針決定
+
+## 議論メモ
+
+LangChain の DocumentLoader / TextSplitter を真似るか迷ったが、自前実装の方針を維持。
+理由は「依存を増やさず、Claude API を直接叩く方が透明」。
+将来 v0.6 で複数 LLM 対応する時に LangChain にすり替える選択肢は残しておく。
+
+ingester の出力先は examples/knowledge/ ではなく一旦別ディレクトリに溜めて、
+人間レビュー後に commit する運用を想定。自動 commit はしない。
