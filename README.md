@@ -10,10 +10,8 @@ YAML frontmatter 付き Markdown ナレッジに対する、**軸メタデータ
 
 ---
 
-<!-- DEMO_GIF_HERE -->
-![demo](examples/screenshots/demo.gif)
-
-> _デモ GIF は Day 20 に中島さんが撮影予定。撮影後 `<!-- DEMO_GIF_HERE -->` 行を削除してください。_
+> 📹 **Demo**: 録画は未公開 (近日追加予定)。動作確認は [Quickstart](#-quickstart-docker) を参照。
+> 撮影手順は [📸 デモ GIF 取得チェックリスト](#-デモ-gif-取得チェックリスト) を参照。
 
 ---
 
