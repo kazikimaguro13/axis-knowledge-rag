@@ -87,3 +87,22 @@ class ListDocumentsInput(_BaseInput):
     limit: int = Field(default=20, ge=1, le=100, description="Max results.")
     offset: int = Field(default=0, ge=0, description="Skip this many results.")
     response_format: ResponseFormat = Field(default=ResponseFormat.MARKDOWN)
+
+
+class IngestInput(_BaseInput):
+    raw_text: str = Field(
+        ...,
+        description="Raw memo text to convert into YAML-frontmatter Markdown.",
+        min_length=20,
+        max_length=10000,
+    )
+    knowledge_dir: str = Field(
+        default="./examples/knowledge",
+        description="Existing knowledge dir, used to derive next id and validate refs.",
+    )
+    suggested_category: str | None = Field(
+        default=None,
+        description="Optional category hint (e.g. '議事録') to bias Claude's axis pick.",
+    )
+    max_tokens: int = Field(default=1500, ge=512, le=4096)
+    response_format: ResponseFormat = Field(default=ResponseFormat.MARKDOWN)

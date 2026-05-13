@@ -1,0 +1,16 @@
+アイデア: ナレッジベースに「読書ログ」軸を足すかも
+
+最近読んでる本の引用 + 感想を貯めたいんだが、
+今の category enum (技術記事 / メモ / 議事録 / ToDo) には収まらない。
+
+候補:
+A. category に "読書ログ" を追加する
+B. 新しい軸 `source_type` を増やす (book / paper / web)
+C. tags でゆるく管理 (book:title みたいな)
+
+たぶん A が一番素直。enum 追加は config.yml 1 行で済む。
+ただ将来 paper, podcast, video など細かく分けたくなる気配があるので、
+v0.5 で B に進化させる前提で、当面は A でいく。
+
+実装メモ: enum 追加するだけだと既存 doc は影響ないので migration 不要。
+ingester (spec_023) にも自動で反映される (config.yml を毎回読むので)。

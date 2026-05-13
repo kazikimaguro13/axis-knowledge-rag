@@ -1,0 +1,19 @@
+LLM 評価指標についてのまとめ (Slack コピペ風)
+
+最近 RAG の精度評価について調べていたので雑に共有。
+
+主に使われてるのは:
+- Faithfulness: 出典文書に書いてあることだけ言ってるか (Hallucination の逆)
+- Answer Relevance: 質問に対して答えが噛み合ってるか
+- Context Precision: 検索で取ってきた document の上位がちゃんと関連してるか
+- Context Recall: 必要な情報が検索で全部拾えてるか
+
+RAGAS とか TruLens がよく使われてる。RAGAS は GPT-4 を裏で呼んで自動評価する系で、
+ground truth がなくても評価できるのが便利。ただし API コストが地味にかかる。
+
+うちのプロジェクトに導入するとしたら:
+1. まず Faithfulness を最優先 (誤答が出ないことが OSS としての信頼)
+2. Context Precision は検索ロジック改善の指標
+3. Recall は手動でゴールデンセット作る必要あるので後回し
+
+ベンチマーク回す頻度は週1くらいでいいかな。CI で毎回回すとコスト爆発する。
