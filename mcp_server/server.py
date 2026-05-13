@@ -26,6 +26,7 @@ from backend.src.normalizer import Normalizer
 from backend.src.rag import RAGPipeline
 from backend.src.search import SearchEngine
 from backend.src.vector_store import VectorStore
+from mcp_server._errors import make_error_response
 from mcp_server.formatters import (
     format_answer_json,
     format_answer_md,
@@ -46,6 +47,21 @@ from mcp_server.schemas import (
 )
 
 configure_logging()
+
+
+class _CorrFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        if not hasattr(record, "corr_id"):
+            record.corr_id = "-----"  # type: ignore[attr-defined]
+        return super().format(record)
+
+
+for _h in logging.getLogger().handlers:
+    _h.setFormatter(_CorrFormatter(
+        "[%(levelname)s] corr=%(corr_id)s %(name)s: %(message)s"
+    ))
+
+
 logger = logging.getLogger("axis_knowledge_rag_mcp")
 
 mcp = FastMCP("axis_knowledge_rag_mcp")
@@ -122,8 +138,7 @@ async def axis_search(params: SearchInput) -> str:
             return format_search_results_json(params.query, params.filters, results)
         return format_search_results_md(params.query, params.filters, results)
     except Exception as e:  # noqa: BLE001 — top-level safety net
-        logger.exception("axis_search failed")
-        return f"Error: {type(e).__name__}: {e}"
+        return make_error_response("axis_search", e)
 
 
 # ============================================================================
@@ -169,8 +184,7 @@ async def axis_answer(params: AnswerInput) -> str:
             return format_answer_json(params.question, ans)
         return format_answer_md(params.question, ans)
     except Exception as e:
-        logger.exception("axis_answer failed")
-        return f"Error: {type(e).__name__}: {e}"
+        return make_error_response("axis_answer", e)
 
 
 # ============================================================================
@@ -191,11 +205,14 @@ async def axis_list_axes(params: ListAxesInput) -> str:
 
     Use this first to discover what filters axis_search / axis_answer accept.
     """
-    cfg = _get_axes()
-    axes = cfg.get("axes", [])
-    if params.response_format == ResponseFormat.JSON:
-        return json.dumps({"axes": axes}, ensure_ascii=False, indent=2)
-    return format_axes_md(axes)
+    try:
+        cfg = _get_axes()
+        axes = cfg.get("axes", [])
+        if params.response_format == ResponseFormat.JSON:
+            return json.dumps({"axes": axes}, ensure_ascii=False, indent=2)
+        return format_axes_md(axes)
+    except Exception as e:
+        return make_error_response("axis_list_axes", e)
 
 
 # ============================================================================
@@ -220,8 +237,7 @@ async def axis_check_integrity(params: CheckIntegrityInput) -> str:
             return json.dumps(report.as_dict(), ensure_ascii=False, indent=2)
         return format_integrity_md(report)
     except Exception as e:
-        logger.exception("axis_check_integrity failed")
-        return f"Error: {type(e).__name__}: {e}"
+        return make_error_response("axis_check_integrity", e)
 
 
 # ============================================================================
@@ -264,8 +280,7 @@ async def axis_list_documents(params: ListDocumentsInput) -> str:
 
         return format_documents_md(window, total, params.offset, has_more, next_offset)
     except Exception as e:
-        logger.exception("axis_list_documents failed")
-        return f"Error: {type(e).__name__}: {e}"
+        return make_error_response("axis_list_documents", e)
 
 
 # ============================================================================
@@ -321,8 +336,7 @@ async def axis_ingest_memo(params: IngestInput) -> str:
             )
         return md
     except Exception as e:
-        logger.exception("axis_ingest_memo failed")
-        return f"Error: {type(e).__name__}: {e}"
+        return make_error_response("axis_ingest_memo", e)
 
 
 def main() -> None:
