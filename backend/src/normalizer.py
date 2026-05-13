@@ -64,6 +64,15 @@ class Normalizer:
             )
         )
 
+    @classmethod
+    def identity(cls) -> "Normalizer":
+        """A pass-through normalizer (all transformations disabled).
+
+        Useful in tests where the input is already in canonical form and
+        any normalization would obscure the assertions.
+        """
+        return cls(NormalizerOptions(nfkc=False, katakana_to_hiragana=False, lowercase=False))
+
     def __call__(self, text: str) -> str:
         return normalize_text(text, self._opts)
 

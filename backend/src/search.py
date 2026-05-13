@@ -8,6 +8,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
+from backend.src.bm25_index import BM25Index
 from backend.src.embedder import Embedder
 from backend.src.normalizer import Normalizer
 from backend.src.vector_store import VectorStore
@@ -99,10 +100,12 @@ class SearchEngine:
         store: VectorStore,
         embedder: Embedder,
         normalizer: Normalizer | None = None,
+        bm25_index: BM25Index | None = None,
     ) -> None:
         self._store = store
         self._embedder = embedder
         self._normalizer = normalizer or Normalizer()
+        self._bm25_index = bm25_index
 
     def search(
         self,
@@ -110,13 +113,19 @@ class SearchEngine:
         *,
         filters: dict[str, Any] | None = None,
         top_k: int = 5,
+        bm25_weight: float = 0.5,
     ) -> list[SearchResult]:
-        """Hybrid search.
+        """Hybrid search (axis + vector + optional BM25 fusion).
 
         Args:
             query: Natural-language query. If None, axis-only search (top_k arbitrary).
             filters: User-friendly axis filters (`{"category": "技術記事"}`).
             top_k: Maximum results to return.
+            bm25_weight: Weight of the BM25 score in the weighted-sum fusion
+                with the vector cosine score. ``0.0`` falls back to the v0.5
+                vector-only behaviour, ``1.0`` ranks purely by BM25. Ignored
+                when no ``bm25_index`` is wired into the engine or when the
+                query is ``None``.
 
         Query / filters are normalized before being passed to Chroma so that
         the index (which stores `axis_*_norm` keys) can match across writing
@@ -129,6 +138,12 @@ class SearchEngine:
         )
         where = _build_where_norm(norm_filters or {})
 
+        use_bm25 = (
+            query is not None
+            and self._bm25_index is not None
+            and bm25_weight > 0.0
+        )
+
         if query is None:
             # Axis-only path: use a zero embedding (Chroma will then sort by
             # distance from zero, which is arbitrary — but we mostly care about
@@ -138,12 +153,40 @@ class SearchEngine:
         else:
             q_norm = self._normalizer(query)
             embedding = self._embedder.embed(q_norm)
-            n = top_k
+            # Over-fetch when fusing so BM25 can re-rank candidates that
+            # ranked just outside the original vector top_k.
+            n = max(top_k * 2, 20) if use_bm25 else top_k
 
         raw = self._store.query(embedding=embedding, n_results=n, where=where)
         results = _to_results(raw)
+
+        if use_bm25:
+            assert query is not None and self._bm25_index is not None
+            bm25_scores = self._bm25_index.score(query)
+            fused: list[SearchResult] = []
+            for r in results:
+                bm25 = bm25_scores.get(r.id, 0.0)
+                final = (1.0 - bm25_weight) * r.score + bm25_weight * bm25
+                fused.append(
+                    SearchResult(
+                        id=r.id,
+                        title=r.title,
+                        score=final,
+                        axes=r.axes,
+                        body_snippet=r.body_snippet,
+                        path=r.path,
+                        refs=r.refs,
+                    )
+                )
+            fused.sort(key=lambda r: r.score, reverse=True)
+            results = fused[:top_k]
+
         logger.info(
-            "search(query=%r, filters=%s) -> %d results", query, filters, len(results)
+            "search(query=%r, filters=%s, bm25_weight=%.2f) -> %d results",
+            query,
+            filters,
+            bm25_weight,
+            len(results),
         )
         return results
 
@@ -165,6 +208,7 @@ def _main(argv: list[str]) -> int:
     p.add_argument("--author")
     p.add_argument("--year", type=int)
     p.add_argument("--top", type=int, default=5)
+    p.add_argument("--bm25-weight", type=float, default=0.0)
     p.add_argument("--db-path", default=str(settings.chroma_db_path))
     args = p.parse_args(argv[1:])
 
@@ -186,7 +230,12 @@ def _main(argv: list[str]) -> int:
     embedder = Embedder()
     normalizer = Normalizer.from_config(load_axes_config())
     engine = SearchEngine(store, embedder, normalizer)
-    results = engine.search(args.query, filters=filters, top_k=args.top)
+    results = engine.search(
+        args.query,
+        filters=filters,
+        top_k=args.top,
+        bm25_weight=args.bm25_weight,
+    )
 
     print(f"\n=== {len(results)} results for query={args.query!r} filters={filters} ===\n")
     for r in results:

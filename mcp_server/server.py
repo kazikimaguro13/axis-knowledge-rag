@@ -124,6 +124,9 @@ async def axis_search(params: SearchInput) -> str:
             query (str|None): natural-language query, optional
             filters (dict): axis filters like {"category": "技術記事"}
             top_k (int): 1-50, default 5
+            bm25_weight (float): 0.0–1.0 weight of BM25 score in the 3-way
+                fusion (axis filter + vector cosine + BM25). 0.0 = vector
+                only (v0.5 behaviour), 1.0 = BM25 only. Default 0.5.
             response_format (markdown|json): output format
         }
 
@@ -132,7 +135,12 @@ async def axis_search(params: SearchInput) -> str:
     """
     try:
         engine = _get_engine()
-        results = engine.search(params.query, filters=params.filters or None, top_k=params.top_k)
+        results = engine.search(
+            params.query,
+            filters=params.filters or None,
+            top_k=params.top_k,
+            bm25_weight=params.bm25_weight,
+        )
         if params.response_format == ResponseFormat.JSON:
             return format_search_results_json(params.query, params.filters, results)
         return format_search_results_md(params.query, params.filters, results)
