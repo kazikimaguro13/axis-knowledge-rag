@@ -142,6 +142,27 @@ async def test_axis_search_no_query_filters_only(populated_engine):
 
 
 @pytest.mark.asyncio
+async def test_axis_search_with_bm25_weight(populated_engine, monkeypatch):
+    """`SearchInput.bm25_weight` is forwarded to `SearchEngine.search`."""
+    captured: dict = {}
+
+    real_search = populated_engine.search
+
+    def _spy(query, *, filters=None, top_k=5, bm25_weight=0.5):
+        captured["bm25_weight"] = bm25_weight
+        captured["top_k"] = top_k
+        return real_search(query, filters=filters, top_k=top_k, bm25_weight=bm25_weight)
+
+    monkeypatch.setattr(populated_engine, "search", _spy)
+
+    params = SearchInput(query="design", top_k=3, bm25_weight=0.7)
+    result = await srv.axis_search(params)
+    assert isinstance(result, str)
+    assert captured["bm25_weight"] == pytest.approx(0.7)
+    assert captured["top_k"] == 3
+
+
+@pytest.mark.asyncio
 async def test_axis_search_empty_query_normalised_to_none(populated_engine):
     params = SearchInput(query="   ", top_k=5)
     assert params.query is None
