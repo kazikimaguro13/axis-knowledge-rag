@@ -2,17 +2,17 @@
 
 ## [Unreleased]
 
-### Day 9 (2026-05-13)
-- backend/src/loader.py: Document に `normalized_title` / `normalized_body` / `normalized_axes` / `normalized_tags` を追加。生フィールドは据え置きで後方互換 (normalizer=None で空のまま)
-- backend/src/loader.py: `load_document` / `load_directory` が optional の `Normalizer` を受け取る
-- backend/src/vector_store.py: `_flatten_axes_with_norm` 追加、metadata に `title_norm` / `tags_norm` / `axis_<key>_norm` を併記
-- backend/src/search.py: `SearchEngine` が `Normalizer` を保持。query と filters を normalize したうえで `axis_*_norm` を where 句に使う `_build_where_norm` を新設
-- backend/src/search.py: `_to_results` が `_norm` サフィックス付きキーを除外して raw axes のみ返す
-- scripts/build_index.py: `Normalizer.from_config(load_axes_config())` を作成、`normalized_body` を embed 対象に
-- streamlit_app.py: `get_pipeline()` で Normalizer を SearchEngine に注入
-- backend/tests/test_integration_normalization.py: 8 ケースの End-to-End normalization 統合テスト (全角/ひらがな/大文字クエリ → 半角/カタカナ/小文字 index のヒット、axis_*_norm 併記検証、後方互換)
-- backend/tests/test_vector_store.py: `_fresh_store()` ヘルパで Chroma EphemeralClient のプロセス内 state 共有による flakiness を解消
-- backend/tests/test_search.py: docs を Normalizer 経由で構築、新しい `axis_*_norm` where 句に追従
+### Day 12 (2026-05-13)
+- pyproject.toml: add `[project.optional-dependencies].dev` with pytest>=8, pytest-cov>=5, ruff>=0.5
+- pyproject.toml: add `[tool.pytest.ini_options]`, `[tool.coverage.run/report]`, `[tool.ruff.lint]` sections
+- backend/tests/conftest.py: shared fixtures — dummy_embedder, in_memory_store (tmp_path-isolated), search_engine, sample_documents
+- backend/tests/test_*.py: convert all 8 test files to pytest style; remove __main__ runners
+- backend/tests/test_normalizer.py: 15-case parametrize table + 4-case query_matches_index parametrize
+- backend/tests/test_marker.py: parametrize for invalid-name and append-newline variants
+- backend/src/*.py + streamlit_app.py: ruff auto-fix (UP035, F401, B905, SIM105)
+- .github/workflows/ci.yml: push/PR → ruff check + pytest --cov-fail-under=70, matrix py311/py312
+- .github/workflows/docker.yml: push/PR → Docker build-only with GHA layer cache
+- Coverage: 72.49% (70% threshold met), 90 tests all PASS
 
 ### Day 11 (2026-05-13)
 - backend/src/marker.py: AUTO_GENERATED block handling — extract_blocks, update_block, strip_blocks, validate_balance

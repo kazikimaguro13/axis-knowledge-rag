@@ -1,8 +1,9 @@
-"""Smoke tests for loader. Run via: python -m backend.tests.test_loader"""
+"""Smoke tests for loader."""
 
-import sys
 import tempfile
 from pathlib import Path
+
+import pytest
 
 from backend.src.loader import LoaderError, load_directory, load_document
 
@@ -40,11 +41,8 @@ def test_missing_id_raises() -> None:
     with tempfile.TemporaryDirectory() as td:
         p = Path(td) / "bad.md"
         _write(p, "---\ntitle: no id\n---\nbody\n")
-        try:
+        with pytest.raises(LoaderError):
             load_document(p)
-        except LoaderError:
-            return
-        raise AssertionError("LoaderError not raised")
 
 
 def test_load_directory_skips_bad_files() -> None:
@@ -61,29 +59,5 @@ def test_load_directory_skips_bad_files() -> None:
 def test_strict_mode_raises_on_bad_file() -> None:
     with tempfile.TemporaryDirectory() as td:
         _write(Path(td) / "bad.md", "---\ntitle: no id\n---\nbody\n")
-        try:
+        with pytest.raises(LoaderError):
             load_directory(Path(td), strict=True)
-        except LoaderError:
-            return
-        raise AssertionError("LoaderError not raised in strict mode")
-
-
-if __name__ == "__main__":
-    tests = [
-        test_load_minimal_document,
-        test_missing_id_raises,
-        test_load_directory_skips_bad_files,
-        test_strict_mode_raises_on_bad_file,
-    ]
-    failed = 0
-    for t in tests:
-        try:
-            t()
-            print(f"PASS: {t.__name__}")
-        except AssertionError as e:
-            print(f"FAIL: {t.__name__}: {e}")
-            failed += 1
-        except Exception as e:
-            print(f"ERROR: {t.__name__}: {type(e).__name__}: {e}")
-            failed += 1
-    sys.exit(1 if failed else 0)

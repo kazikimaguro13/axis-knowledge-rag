@@ -1,7 +1,8 @@
-"""Smoke tests for vector_store. Run via: python -m backend.tests.test_vector_store"""
+"""Smoke tests for vector_store."""
 
-import sys
 from pathlib import Path
+
+import pytest
 
 from backend.src.embedder import Embedder
 from backend.src.loader import Document
@@ -21,61 +22,44 @@ def _make_doc(doc_id: str, body: str = "body text") -> Document:
     )
 
 
-def _fresh_store() -> VectorStore:
-    # Chroma EphemeralClient はプロセス内で内部 system を共有するため、
-    # 同一 COLLECTION_NAME を使うテストでは毎回 reset() で隔離する。
-    s = VectorStore(in_memory=True)
-    s.reset()
-    return s
-
-
-def test_upsert_increments_count() -> None:
-    store = _fresh_store()
-    embedder = Embedder(force_dummy=True)
+def test_upsert_increments_count(in_memory_store: VectorStore, dummy_embedder: Embedder) -> None:
     doc = _make_doc("d1")
-    store.upsert(doc, embedder.embed(doc.body))
-    assert store.count() == 1
+    in_memory_store.upsert(doc, dummy_embedder.embed(doc.body))
+    assert in_memory_store.count() == 1
 
 
-def test_upsert_many_and_query_returns_results() -> None:
-    store = _fresh_store()
-    embedder = Embedder(force_dummy=True)
+def test_upsert_many_and_query_returns_results(
+    in_memory_store: VectorStore, dummy_embedder: Embedder
+) -> None:
     docs = [_make_doc(f"d{i}", body=f"body {i}") for i in range(3)]
-    embeddings = embedder.embed_batch([d.body for d in docs])
-    store.upsert_many(docs, embeddings)
-    assert store.count() == 3
+    embeddings = dummy_embedder.embed_batch([d.body for d in docs])
+    in_memory_store.upsert_many(docs, embeddings)
+    assert in_memory_store.count() == 3
 
-    q = embedder.embed("body 0")
-    result = store.query(q, n_results=2)
+    q = dummy_embedder.embed("body 0")
+    result = in_memory_store.query(q, n_results=2)
     assert "ids" in result
     assert len(result["ids"][0]) == 2
 
 
-def test_reset_clears_collection() -> None:
-    store = _fresh_store()
-    embedder = Embedder(force_dummy=True)
+def test_reset_clears_collection(in_memory_store: VectorStore, dummy_embedder: Embedder) -> None:
     doc = _make_doc("d1")
-    store.upsert(doc, embedder.embed(doc.body))
-    assert store.count() == 1
-    store.reset()
-    assert store.count() == 0
+    in_memory_store.upsert(doc, dummy_embedder.embed(doc.body))
+    assert in_memory_store.count() == 1
+    in_memory_store.reset()
+    assert in_memory_store.count() == 0
 
 
-def test_upsert_many_length_mismatch_raises() -> None:
-    store = _fresh_store()
-    embedder = Embedder(force_dummy=True)
+def test_upsert_many_length_mismatch_raises(
+    in_memory_store: VectorStore, dummy_embedder: Embedder
+) -> None:
     docs = [_make_doc("d1"), _make_doc("d2")]
-    embeddings = [embedder.embed("only one")]
-    try:
-        store.upsert_many(docs, embeddings)
-    except ValueError:
-        return
-    raise AssertionError("ValueError not raised for length mismatch")
+    embeddings = [dummy_embedder.embed("only one")]
+    with pytest.raises(ValueError):
+        in_memory_store.upsert_many(docs, embeddings)
 
 
-def test_axis_filter_query() -> None:
-    store = _fresh_store()
-    embedder = Embedder(force_dummy=True)
+def test_axis_filter_query(in_memory_store: VectorStore, dummy_embedder: Embedder) -> None:
     d_test = _make_doc("d_test")
     d_other = Document(
         id="d_other",
@@ -87,31 +71,9 @@ def test_axis_filter_query() -> None:
         path=Path("/tmp/d_other.md"),
         raw_meta={},
     )
-    store.upsert(d_test, embedder.embed(d_test.body))
-    store.upsert(d_other, embedder.embed(d_other.body))
-    result = store.query(
-        embedder.embed("query"), n_results=5, where={"axis_category": "test"}
+    in_memory_store.upsert(d_test, dummy_embedder.embed(d_test.body))
+    in_memory_store.upsert(d_other, dummy_embedder.embed(d_other.body))
+    result = in_memory_store.query(
+        dummy_embedder.embed("query"), n_results=5, where={"axis_category": "test"}
     )
     assert result["ids"][0] == ["d_test"]
-
-
-if __name__ == "__main__":
-    tests = [
-        test_upsert_increments_count,
-        test_upsert_many_and_query_returns_results,
-        test_reset_clears_collection,
-        test_upsert_many_length_mismatch_raises,
-        test_axis_filter_query,
-    ]
-    failed = 0
-    for t in tests:
-        try:
-            t()
-            print(f"PASS: {t.__name__}")
-        except AssertionError as e:
-            print(f"FAIL: {t.__name__}: {e}")
-            failed += 1
-        except Exception as e:
-            print(f"ERROR: {t.__name__}: {type(e).__name__}: {e}")
-            failed += 1
-    sys.exit(1 if failed else 0)
