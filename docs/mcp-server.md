@@ -256,6 +256,9 @@ No cycles
 ### 3-5. `axis_list_documents`
 
 ナレッジベース内のドキュメント一覧を軸フィルタ + ページング付きで返す。
+内部実装は `VectorStore.list_with_filter()` (ChromaDB `collection.get` ベース) を
+直接呼び出す形に変更され (spec_026)、**`total` は真の件数を返します**。
+以前のような 200 件上限はありません。
 
 **Input schema:**
 
@@ -478,7 +481,7 @@ mcp-cli tool call axis_search '{"query": "RAG", "top_k": 3}'
 |---|---|
 | stdio transport のみ | HTTP transport は spec_023 候補。stdio で Claude Desktop / Cowork には対応 |
 | write 系 tool なし | `axis_add_document` / `axis_reindex` は spec_024 / v0.5 候補 |
-| pagination は local | `axis_list_documents` は `top_k=200` で全件取得しメモリ上でページング。大規模 KB では要改善 |
+| pagination は ChromaDB native | `axis_list_documents` は `collection.get(limit, offset)` で取得。200 件上限なし (spec_026) |
 | `axis_check_integrity` は毎回ファイル読み直し | キャッシュなし。大量ファイル時は遅い可能性あり |
 | `openWorldHint` は `axis_answer` のみ `true` | 他 4 tools はローカル完結のため `false` |
 
