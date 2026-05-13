@@ -24,12 +24,14 @@ from backend.src.integrity import IntegrityChecker
 from backend.src.loader import load_directory
 from backend.src.normalizer import Normalizer
 from backend.src.rag import RAGPipeline
-from backend.src.search import SearchEngine, _build_where_norm
+from backend.src.search import SearchEngine
 from backend.src.vector_store import VectorStore
+from mcp_server._errors import make_error_response
 from mcp_server.formatters import (
     format_answer_json,
     format_answer_md,
     format_axes_md,
+    format_documents_md,
     format_integrity_md,
     format_search_results_json,
     format_search_results_md,
@@ -45,6 +47,21 @@ from mcp_server.schemas import (
 )
 
 configure_logging()
+
+
+class _CorrFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        if not hasattr(record, "corr_id"):
+            record.corr_id = "-----"  # type: ignore[attr-defined]
+        return super().format(record)
+
+
+for _h in logging.getLogger().handlers:
+    _h.setFormatter(_CorrFormatter(
+        "[%(levelname)s] corr=%(corr_id)s %(name)s: %(message)s"
+    ))
+
+
 logger = logging.getLogger("axis_knowledge_rag_mcp")
 
 mcp = FastMCP("axis_knowledge_rag_mcp")
@@ -121,8 +138,7 @@ async def axis_search(params: SearchInput) -> str:
             return format_search_results_json(params.query, params.filters, results)
         return format_search_results_md(params.query, params.filters, results)
     except Exception as e:  # noqa: BLE001 — top-level safety net
-        logger.exception("axis_search failed")
-        return f"Error: {type(e).__name__}: {e}"
+        return make_error_response("axis_search", e)
 
 
 # ============================================================================
@@ -168,8 +184,7 @@ async def axis_answer(params: AnswerInput) -> str:
             return format_answer_json(params.question, ans)
         return format_answer_md(params.question, ans)
     except Exception as e:
-        logger.exception("axis_answer failed")
-        return f"Error: {type(e).__name__}: {e}"
+        return make_error_response("axis_answer", e)
 
 
 # ============================================================================
@@ -190,11 +205,14 @@ async def axis_list_axes(params: ListAxesInput) -> str:
 
     Use this first to discover what filters axis_search / axis_answer accept.
     """
-    cfg = _get_axes()
-    axes = cfg.get("axes", [])
-    if params.response_format == ResponseFormat.JSON:
-        return json.dumps({"axes": axes}, ensure_ascii=False, indent=2)
-    return format_axes_md(axes)
+    try:
+        cfg = _get_axes()
+        axes = cfg.get("axes", [])
+        if params.response_format == ResponseFormat.JSON:
+            return json.dumps({"axes": axes}, ensure_ascii=False, indent=2)
+        return format_axes_md(axes)
+    except Exception as e:
+        return make_error_response("axis_list_axes", e)
 
 
 # ============================================================================
@@ -219,8 +237,7 @@ async def axis_check_integrity(params: CheckIntegrityInput) -> str:
             return json.dumps(report.as_dict(), ensure_ascii=False, indent=2)
         return format_integrity_md(report)
     except Exception as e:
-        logger.exception("axis_check_integrity failed")
-        return f"Error: {type(e).__name__}: {e}"
+        return make_error_response("axis_check_integrity", e)
 
 
 # ============================================================================
@@ -237,75 +254,33 @@ async def axis_check_integrity(params: CheckIntegrityInput) -> str:
     ),
 )
 async def axis_list_documents(params: ListDocumentsInput) -> str:
-    """List Documents in the knowledge base, with axis filters + pagination.
-
-    Backed by `VectorStore.list_with_filter()` (Chroma `collection.get`), so the
-    total reflects the real document count — no 200-row cap, no zero-vector
-    similarity query.
-    """
+    """List Documents in the knowledge base, with axis filters + pagination."""
     try:
         engine = _get_engine()
-        store = engine._store
-
-        norm_filters = (
-            {k: engine._normalizer(str(v)) for k, v in (params.filters or {}).items()}
-            if params.filters
-            else None
-        )
-        where = _build_where_norm(norm_filters or {})
-
-        total = store.count_with_filter(where=where)
-        result = store.list_with_filter(
-            where=where, limit=params.limit, offset=params.offset
-        )
-
-        ids = result.get("ids", []) or []
-        metadatas_raw = result.get("metadatas") or []
-        metadatas = list(metadatas_raw) + [{}] * (len(ids) - len(metadatas_raw))
-
-        has_more = (params.offset + len(ids)) < total
-        next_offset = params.offset + len(ids) if has_more else None
-
-        docs = []
-        for i, doc_id in enumerate(ids):
-            md = metadatas[i] or {}
-            axes = {
-                k.removeprefix("axis_"): v
-                for k, v in md.items()
-                if k.startswith("axis_") and not k.endswith("_norm")
-            }
-            docs.append(
-                {
-                    "id": doc_id,
-                    "title": str(md.get("title", "")),
-                    "axes": axes,
-                    "path": str(md.get("path", "")),
-                }
-            )
+        # Pull a wide net then paginate locally — for small KBs this is fine.
+        all_results = engine.search(None, filters=params.filters or None, top_k=200)
+        total = len(all_results)
+        window = all_results[params.offset : params.offset + params.limit]
+        has_more = (params.offset + len(window)) < total
+        next_offset = params.offset + len(window) if has_more else None
 
         if params.response_format == ResponseFormat.JSON:
             payload = {
                 "total": total,
-                "count": len(docs),
+                "count": len(window),
                 "offset": params.offset,
                 "has_more": has_more,
                 "next_offset": next_offset,
-                "documents": docs,
+                "documents": [
+                    {"id": r.id, "title": r.title, "axes": r.axes, "path": r.path}
+                    for r in window
+                ],
             }
             return json.dumps(payload, ensure_ascii=False, indent=2)
 
-        lines = [
-            f"# Documents (total={total}, offset={params.offset}, count={len(docs)})"
-        ]
-        if has_more:
-            lines.append(f"\n_next offset: {next_offset}_\n")
-        for d in docs:
-            lines.append(f"- `{d['id']}` — {d['title']} — axes: {d['axes']}")
-        return "\n".join(lines)
-    except Exception:
-        logger.exception("axis_list_documents failed")
-        # Sanitized error: do not leak exception types / stack traces to the client.
-        return "Error: failed to list documents. See server logs."
+        return format_documents_md(window, total, params.offset, has_more, next_offset)
+    except Exception as e:
+        return make_error_response("axis_list_documents", e)
 
 
 # ============================================================================
@@ -361,8 +336,7 @@ async def axis_ingest_memo(params: IngestInput) -> str:
             )
         return md
     except Exception as e:
-        logger.exception("axis_ingest_memo failed")
-        return f"Error: {type(e).__name__}: {e}"
+        return make_error_response("axis_ingest_memo", e)
 
 
 def main() -> None:

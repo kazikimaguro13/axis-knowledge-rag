@@ -2,18 +2,14 @@
 
 ## [Unreleased]
 
-### Day 26 (2026-05-13) — Ingester 堅牢化 (二重スキャン排除 + JSON リトライ + list_documents 上限解除) (spec_026)
-- backend/src/ingester.py: `_scan_knowledge_dir()` を新設し、`load_directory()` 呼び出しを ingest あたり 2 回 → 1 回に削減 (N 件バッチで 2N→N 回 frontmatter parse)。`_next_doc_id` / `_existing_doc_ids` は背後で `_scan_knowledge_dir` を呼ぶ薄い back-compat wrapper に
-- backend/src/ingester.py: Claude が invalid JSON を返したとき最大 `retry_count` (default 2) 回リトライ。再試行毎に user_msg に `# previous_attempt_failed` ブロック (前回の例外型 + メッセージ) を添えて Claude に自己修正させる。全試行失敗時は `RuntimeError("after N attempts: ...")` を raise
-- backend/src/ingester_schemas.py: `IngestOptions` に `retry_count: int = Field(default=2, ge=0, le=5)` を追加
-- backend/src/vector_store.py: `list_with_filter(where, limit, offset)` / `count_with_filter(where)` を追加。ChromaDB `collection.get()` ベースなので query embedding 不要 + 上限なし
-- mcp_server/server.py: `axis_list_documents` を `list_with_filter` ベースに書き換え — 200 件 top_k cap を撤廃して `total` が真の件数を返すように、ゼロベクトル query 経路を廃止、エラーメッセージを sanitize (例外型 / メッセージを client にリークしない)。`format_documents_md` import は撤去
-- backend/tests/test_ingester.py: 単一スキャンテスト (`_scan_knowledge_dir` / end-to-end `ingest()` で `load_directory` が 1 回しか呼ばれない)、リトライテスト (2 回目で成功 / リトライ枯渇で raise / `retry_count=0` 即時 fail) を 5 件追加
-- backend/tests/test_vector_store.py: 250 件 dataset での pagination テスト (offset=200, 240)、`count_with_filter` (no-filter / axis filter)、`list_with_filter` の where 句マッチを 3 件追加
-- mcp_server/tests/test_server.py: 250 件 dataset で `axis_list_documents` が `total=250` を返すこと、offset=210 でページングが続くこと、内部例外時に `Error: failed to list documents.` の sanitized メッセージのみが返ること (スタックトレース・パスをリークしない) の 3 件追加
-- docs/ingester.md: 「`_scan_knowledge_dir` で 1 回スキャンに統合」「JSON リトライ機構 (前回エラーフィードバック方式)」を設計要点・既知制約に追記。v0.5+ ロードマップから「retry & repair」を削除
-- docs/mcp-server.md: `axis_list_documents` 説明に「`total` は真の件数を返す。200 件上限なし (spec_026)」を明記。既知制約表の「pagination は local」行を「ChromaDB native (上限なし)」に更新
-- 設計の意図: result_024.md (CC レビュー §6 推奨) で Warning 指摘された Performance #6 + Correctness #7 + ChromaDB API #9 (`axis_list_documents` ゼロベクトル) を一括解消。spec_027 (MCP error sanitization 全体) の axis_list_documents 分は先行対応
+### Day 27 (2026-05-13) — MCP error sanitization (内部情報漏洩防止) (spec_027)
+
+- mcp_server/_errors.py: 新規 — `make_error_response()` + `new_correlation_id()` (5 char UUID hex)
+- mcp_server/server.py: 全 6 tool の except 節を `make_error_response()` 呼び出しに統一。`axis_list_axes` は既存 try/except なしだったので追加
+- mcp_server/server.py: `_CorrFormatter` を `configure_logging()` 直後に設定 — `[%(levelname)s] corr=%(corr_id)s %(name)s: %(message)s` フォーマット。`corr_id` 未付与の record は `-----` でフォールバック
+- Internal exception details (file path, API error body, Pydantic input echo, ChromaDB fragment) を MCP client に露出させない設計に統一
+- mcp_server/tests/test_server.py: `test_axis_search_error_is_sanitized` (caplog で full exception がログに残ることも確認) + `test_all_tools_error_sanitized` (全 6 tool を parametrize、ZeroDivisionError が戻り値に含まれないことを検証)
+- docs/mcp-server.md: Error handling セクション (§4) 追加、既存セクション番号を繰り下げ、ファイル構成・テストカバレッジ表を更新 (21 → 28 tests)
 
 ### Day 25 (2026-05-13) — Doc 整合性パス (v0.4 メタデータ統一) (spec_025)
 - pyproject.toml: `version` を `0.1.0.dev0` → `0.4.0` に更新 (実体に追従)
