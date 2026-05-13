@@ -21,8 +21,16 @@ def _make_doc(doc_id: str, body: str = "body text") -> Document:
     )
 
 
+def _fresh_store() -> VectorStore:
+    # Chroma EphemeralClient はプロセス内で内部 system を共有するため、
+    # 同一 COLLECTION_NAME を使うテストでは毎回 reset() で隔離する。
+    s = VectorStore(in_memory=True)
+    s.reset()
+    return s
+
+
 def test_upsert_increments_count() -> None:
-    store = VectorStore(in_memory=True)
+    store = _fresh_store()
     embedder = Embedder(force_dummy=True)
     doc = _make_doc("d1")
     store.upsert(doc, embedder.embed(doc.body))
@@ -30,7 +38,7 @@ def test_upsert_increments_count() -> None:
 
 
 def test_upsert_many_and_query_returns_results() -> None:
-    store = VectorStore(in_memory=True)
+    store = _fresh_store()
     embedder = Embedder(force_dummy=True)
     docs = [_make_doc(f"d{i}", body=f"body {i}") for i in range(3)]
     embeddings = embedder.embed_batch([d.body for d in docs])
@@ -44,7 +52,7 @@ def test_upsert_many_and_query_returns_results() -> None:
 
 
 def test_reset_clears_collection() -> None:
-    store = VectorStore(in_memory=True)
+    store = _fresh_store()
     embedder = Embedder(force_dummy=True)
     doc = _make_doc("d1")
     store.upsert(doc, embedder.embed(doc.body))
@@ -54,7 +62,7 @@ def test_reset_clears_collection() -> None:
 
 
 def test_upsert_many_length_mismatch_raises() -> None:
-    store = VectorStore(in_memory=True)
+    store = _fresh_store()
     embedder = Embedder(force_dummy=True)
     docs = [_make_doc("d1"), _make_doc("d2")]
     embeddings = [embedder.embed("only one")]
@@ -66,7 +74,7 @@ def test_upsert_many_length_mismatch_raises() -> None:
 
 
 def test_axis_filter_query() -> None:
-    store = VectorStore(in_memory=True)
+    store = _fresh_store()
     embedder = Embedder(force_dummy=True)
     d_test = _make_doc("d_test")
     d_other = Document(
