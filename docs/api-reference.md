@@ -19,7 +19,7 @@ Interactive docs (Swagger UI): `http://localhost:8000/api/docs`
 ```json
 {
   "status": "ok",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "embedder_mode": "DUMMY",
   "rag_mode": "DUMMY"
 }
@@ -48,13 +48,18 @@ Interactive docs (Swagger UI): `http://localhost:8000/api/docs`
     {
       "name": "category",
       "type": "enum",
-      "values": ["技術記事", "ノウハウ", "メモ"],
-      "required": false
+      "values": ["技術記事", "メモ", "議事録", "ToDo"],
+      "required": true
+    },
+    {
+      "name": "topic",
+      "type": "string",
+      "required": true
     },
     {
       "name": "level",
       "type": "enum",
-      "values": ["入門", "中級", "上級"],
+      "values": ["初級", "中級", "上級"],
       "required": false
     }
   ]
