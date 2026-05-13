@@ -464,6 +464,133 @@ v0.4 で `Chunk` データクラスを導入し、`Document` から複数の `Ch
 
 ---
 
+## ADR-013: 疑似ストリーミング (typewriter) を採用、SSE/WebSocket は v0.4 へ
+
+- **Date**: 2026-05-13
+- **Status**: Accepted
+- **Deciders**: 中島
+
+### Context
+
+RAG 回答生成は Claude API の呼び出しで数秒かかる。ユーザー体験として「回答が少しずつ表示される」
+ストリーミング感が欲しい。選択肢は (a) SSE (Server-Sent Events)、(b) WebSocket、
+(c) 一括受信後のクライアント側疑似ストリーミング (typewriter) の 3 つ。
+
+SSE/WS は FastAPI 側の `StreamingResponse` と Next.js 側の `EventSource` / `WebSocket` クライアントを
+両方実装する必要があり、Week 3 のスコープに対して工数が大きい。
+
+### Decision
+
+v0.3 では**クライアント側 typewriter アニメーション**を採用する。
+FastAPI から一括で回答テキストを返し、`AnswerPanel` がレスポンス受信後に 1 文字ずつ描画する。
+
+SSE / WS による真のストリーミングは v0.4 の拡張ポイントとして ADR に記録するにとどめる。
+
+### Consequences
+
+- ✅ バックエンド変更不要、フロントエンドのみで「ストリーミング感」を実現
+- ✅ Week 3 のスコープに収まる
+- ✅ DUMMY モードと本番モードで挙動が変わらない
+- ❌ 実際には全文受信後に表示するため、長い回答ではユーザーが待つ時間がある
+- ❌ 真のストリーミングより Context Window の効率が若干落ちる
+
+### Alternatives Considered
+
+- **SSE**: `StreamingResponse` + `EventSource` — バックエンドも変更必要、v0.4 で対応
+- **WebSocket**: さらに工数が大きく、双方向通信が必要なユースケースでもない
+
+---
+
+## ADR-014: Streamlit を deprecated せず残す (後退路用)
+
+- **Date**: 2026-05-13
+- **Status**: Accepted
+- **Deciders**: 中島
+
+### Context
+
+ADR-004 では「Week 3 で Streamlit を削除し Next.js に全面移行」と決定していた。
+しかし実際には、Next.js 移行後も Streamlit を削除せずに残す判断をした。
+
+理由は (a) Next.js frontend が壊れた場合の後退路として機能すること、
+(b) README で「2 種類の UI が試せる」という独自性を示せること、
+(c) 削除のコストに対してリターンが薄いこと。
+
+### Decision
+
+`streamlit_app.py` を v0.3 でも削除せず残す。
+README と architecture.md に「レガシー UI / 後退路用」と明記し、
+メイン UI は Next.js であることを明示する。
+
+### Consequences
+
+- ✅ Next.js frontend に問題が起きたときの保険として機能
+- ✅ ポートフォリオ上「2 UI 構成」という差別化要素になる
+- ✅ Streamlit 削除による破壊テストをスキップできる
+- ❌ 2 つの UI を維持するコストが残る (バックエンド変更時に両方確認が必要)
+- ❌ v0.4 で機能追加する際に Streamlit 側が陳腐化していく
+
+### Alternatives Considered
+
+- **削除**: シンプルだが ADR-004 の想定通り。後退路が消え、ポートフォリオ訴求力も一点集中になる
+- **別ブランチで保持**: git 管理が複雑になり、CI での維持が手間
+
+---
+
+## ADR-015: Docker multi-stage で frontend image を slim 化
+
+- **Date**: 2026-05-13
+- **Status**: Accepted
+- **Deciders**: 中島
+
+### Context
+
+Next.js の Docker image は単純にビルドすると `node_modules` を丸ごと含み 1GB 超になる。
+本番デプロイ・GitHub Actions でのビルド時間・イメージ pull コストを考えると、
+slim 化が必要。
+
+### Decision
+
+`frontend/Dockerfile` に multi-stage build を採用する:
+
+```dockerfile
+# Stage 1: builder
+FROM node:20-alpine AS builder
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci
+COPY . .
+RUN npm run build
+
+# Stage 2: runner (本番イメージ)
+FROM node:20-alpine AS runner
+WORKDIR /app
+ENV NODE_ENV production
+COPY --from=builder /app/.next/standalone ./
+COPY --from=builder /app/.next/static ./.next/static
+COPY --from=builder /app/public ./public
+EXPOSE 3000
+CMD ["node", "server.js"]
+```
+
+`next.config.js` に `output: "standalone"` を設定し、Next.js が `server.js` を含む
+standalone ディレクトリを生成するようにする。
+
+### Consequences
+
+- ✅ イメージサイズを ~1GB → ~200MB 程度に削減 (目安)
+- ✅ CI/CD でのビルド・push・pull が高速化
+- ✅ 本番環境でのデプロイコストが下がる
+- ❌ `standalone` モードでは `public/` と `static/` の手動 COPY が必要
+- ❌ Next.js のバージョンアップ時に `output: standalone` の動作確認が必要
+
+### Alternatives Considered
+
+- **single-stage**: シンプルだがイメージが大きすぎる
+- **distroless**: セキュリティ強化だが Node.js 向けの distroless は設定が複雑
+
+---
+
 ## ADR の追加・改訂ルール
 
 1. **追加**: 末尾に `ADR-NNN` で連番。Date / Status / Deciders を書き、5 セクション (Context / Decision / Consequences / Alternatives / Status) を埋める

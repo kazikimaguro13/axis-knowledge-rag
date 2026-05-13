@@ -2,17 +2,13 @@
 
 ## [Unreleased]
 
-### Day 16 (2026-05-13)
-- frontend/: bootstrap Next.js 14.2.35 (App Router) + TypeScript strict + Tailwind 3.4 + ESLint via `create-next-app@14 --typescript --tailwind --eslint --app --src-dir --import-alias "@/*" --use-npm`
-- frontend/src/app/layout.tsx: 共通レイアウト + ヘッダーナビ (検索 / 設定), `lang="ja"`, Tailwind utility ベース
-- frontend/src/app/page.tsx: 検索画面 (Day 17 で SearchBar / AxisFilter / ResultCard 実装予定の placeholder)
-- frontend/src/app/settings/page.tsx: 設定画面 placeholder (将来 config.yml 編集 UI)
-- frontend/src/lib/api.ts: FastAPI 用 typed fetcher — `api.health/axes/search/answer`, `NEXT_PUBLIC_API_BASE` env で URL 切替
-- frontend/src/components/.gitkeep: Day 17 用ディレクトリ確保
-- frontend/.env.local.example: `NEXT_PUBLIC_API_BASE=http://localhost:8000`
-- .gitignore: `frontend/.env.local`, `frontend/.env*.local` を ignore, `!frontend/.env.local.example` で example のみ commit 許可
-- docs/architecture.md: Frontend セクション (§7) 追加 — ディレクトリ・スタック・API 連携図・開発フロー
-- 動作確認: `npm run lint` ✓ no warnings, `npm run build` ✓ (3 routes static, First Load JS 87.4kB), `npm run dev` → `/` `/settings` ともに HTTP 200
+### Day 20 (2026-05-13)
+- README.md: v0.3 全面改稿 — shields.io バッジ (Version 0.3.0 / Next.js 14 追加)、デモ GIF placeholder、Next.js + FastAPI アーキ図 (ASCII)、デモ GIF 取得チェックリスト、ロードマップ v0.1〜v0.3 全 ✅
+- docs/architecture.md: v0.3 構成に更新 — Next.js 14 + FastAPI の ASCII コンポーネント図、Mermaid フロー図、コンポーネント責務一覧 (backend/frontend 両方)、v0.3 Docker Compose 構成
+- docs/design-decisions.md: ADR-013 (疑似ストリーミング typewriter)、ADR-014 (Streamlit を deprecated せず残す)、ADR-015 (Docker multi-stage frontend slim 化) を追加
+- docs/api-reference.md: 全 4 endpoint を最終版に整備 — エラーレスポンス仕様、全フィールド説明、起動方法追記
+- docs/deployment.md: 新規 — Local Docker / ChromaDB バックアップ / Fly.io / Cloud Run / TLS プロキシ / CI/CD 構成
+- docs/portfolio-notes.md: 新規 — ES / 履歴書記述用素材集 (使用技術 / 成果物概要 / 工夫した点 / 数字まとめ / 面接 Q&A)
 
 ### Day 15 (2026-05-13)
 - backend/src/schemas.py: Pydantic v2 schemas — HealthResponse, AxisDef, AxesResponse, SearchRequest, SearchResultPayload, SearchResponse, AnswerRequest, AnswerResponse
