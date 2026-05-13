@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Day 17 (2026-05-13)
+- frontend/src/components/SearchBar.tsx: 新規 — クエリ入力 + 検索ボタン (presentational, `value`/`onChange`/`onSubmit`/`isLoading` props), `aria-label` + `aria-busy` 設定
+- frontend/src/components/AxisFilter.tsx: 新規 — `/api/axes` を `useEffect` で fetch、enum→select / integer→number input / string→text input を動的生成、`filters` を controlled prop で受け取る
+- frontend/src/components/ResultCard.tsx: 新規 — 1 件の検索結果カード (`title` / `score` / `axes` / `body_snippet` / `path` 表示)、Day 18 用に `cited` prop で `★ cited` バッジ予約
+- frontend/src/app/page.tsx: 3 コンポーネントを組み合わせ、`api.search` を叩いて結果表示。`useState` のみで `query` / `filters` / `results` / `isLoading` / `error` を管理
+- Tailwind ベースのレイアウト (`md:grid-cols-[240px_1fr]`)、空状態 / エラー / 結果件数表示の3パターン分岐
+
 ### Day 20 (2026-05-13)
 - README.md: v0.3 全面改稿 — shields.io バッジ (Version 0.3.0 / Next.js 14 追加)、デモ GIF placeholder、Next.js + FastAPI アーキ図 (ASCII)、デモ GIF 取得チェックリスト、ロードマップ v0.1〜v0.3 全 ✅
 - docs/architecture.md: v0.3 構成に更新 — Next.js 14 + FastAPI の ASCII コンポーネント図、Mermaid フロー図、コンポーネント責務一覧 (backend/frontend 両方)、v0.3 Docker Compose 構成
