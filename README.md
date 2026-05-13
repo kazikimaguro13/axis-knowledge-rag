@@ -114,6 +114,17 @@ Markdown → loader → embedder (Gemini) → ChromaDB
 - **rag** — Claude API 呼び出し + 出典 ID 抽出 (`backend/src/rag.py`)
 - **streamlit_app.py** — サイドバー軸フィルタ + 質問入力 + 回答パネル
 
+## 📚 Documentation
+
+詳細な設計は [`docs/`](docs/) を参照:
+
+- [Architecture](docs/architecture.md) — システム全体像、コンポーネント図、データフロー
+- [Design Decisions](docs/design-decisions.md) — 主要な設計判断 (ADR) 12 件
+- [API Reference](docs/api-reference.md) — モジュール別 public API
+- [Documentation Index](docs/INDEX.md) — `docs/` 全体の目次
+
+機能ごとの詳細: [normalizer](docs/normalizer.md) / [integrity](docs/integrity.md) / [marker](docs/marker.md)
+
 ## 📜 ライセンス
 
 [MIT](LICENSE)
