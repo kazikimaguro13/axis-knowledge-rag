@@ -10,8 +10,9 @@ interface Props {
 export default function ResultCard({ result, cited = false }: Props) {
   return (
     <article
+      id={result.id}
       className={
-        "rounded border bg-white p-4 shadow-sm transition " +
+        "scroll-mt-4 rounded border bg-white p-4 shadow-sm transition " +
         (cited ? "border-emerald-400" : "border-slate-200")
       }
     >
