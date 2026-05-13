@@ -3,17 +3,15 @@
 YAML frontmatter 付き Markdown ナレッジに対する、**軸メタデータ検索 + ベクトル検索 + RAG** のローカル Web アプリ OSS。
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/Version-0.3.0-brightgreen.svg)](#ロードマップ)
+[![Version](https://img.shields.io/badge/Version-0.4.0-brightgreen.svg)](#ロードマップ)
 [![Python: 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
 [![Next.js](https://img.shields.io/badge/Next.js-14-black.svg)](https://nextjs.org/)
-[![Status: v0.3](https://img.shields.io/badge/Status-v0.3-orange.svg)](#ロードマップ)
+[![Status: v0.4](https://img.shields.io/badge/Status-v0.4-orange.svg)](#ロードマップ)
 
 ---
 
-<!-- DEMO_GIF_HERE -->
-![demo](examples/screenshots/demo.gif)
-
-> _デモ GIF は Day 20 に中島さんが撮影予定。撮影後 `<!-- DEMO_GIF_HERE -->` 行を削除してください。_
+> 📹 **Demo**: 録画は未公開 (近日追加予定)。動作確認は [Quickstart](#-quickstart-docker) を参照。
+> 撮影手順は [📸 デモ GIF 取得チェックリスト](#-デモ-gif-取得チェックリスト) を参照。
 
 ---
 
@@ -229,7 +227,7 @@ updated: 2026-05-12
 | ✅ **v0.1.0** | 2026-05-12 | コア MVP (Streamlit UI + 軸検索 + RAG + Docker) |
 | ✅ **v0.2.0** | 2026-05-13 | 表記ゆれ吸収 / 参照整合性チェック / マーカー方式 / pytest CI |
 | ✅ **v0.3.0** | 2026-05-13 | Next.js + FastAPI 移行、UI/UX 全面刷新、README 完全版 |
-| ✅ **v0.4.0** | 2026-05-13 | MCP server (stdio) — 5 read-only tools、Claude Desktop / Cowork 対応 |
+| ✅ **v0.4.0** | 2026-05-13 | MCP server (stdio) — 6 tools (5 read + 1 ingest)、Claude Desktop / Cowork 対応 |
 | 🔜 **v0.5+** | 未定 | Streamable HTTP transport、write tools (index_add / reindex)、OAuth 2.1 |
 
 ---
