@@ -42,6 +42,48 @@ docker compose up
 
 ---
 
+---
+
+## 🔌 MCP server として使う
+
+Claude Desktop / Cowork / 任意の MCP 対応クライアントから、本リポジトリのナレッジを直接検索 / 質問できます。
+
+### Claude Desktop 設定例
+
+`~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) または `%APPDATA%\Claude\claude_desktop_config.json` (Windows) に追記:
+
+```json
+{
+  "mcpServers": {
+    "axis-knowledge-rag": {
+      "command": "python3",
+      "args": ["-m", "mcp_server"],
+      "cwd": "/path/to/axis-knowledge-rag",
+      "env": {
+        "ANTHROPIC_API_KEY": "sk-ant-...",
+        "GEMINI_API_KEY": "AIza..."
+      }
+    }
+  }
+}
+```
+
+サンプル設定ファイル: [`examples/claude_desktop_config.json`](examples/claude_desktop_config.json)
+
+### 提供される tools
+
+| Tool | 役割 |
+|---|---|
+| `axis_search` | 軸フィルタ + ベクトル hybrid 検索 |
+| `axis_answer` | RAG (Claude API + 出典) |
+| `axis_list_axes` | 軸定義の取得 |
+| `axis_check_integrity` | 参照整合性チェック |
+| `axis_list_documents` | ドキュメント一覧 (pagination) |
+
+詳細: [docs/mcp-server.md](docs/mcp-server.md)
+
+---
+
 ## 🛠 手動セットアップ (Docker 不使用)
 
 ### Backend (Python)
@@ -162,7 +204,8 @@ updated: 2026-05-12
 | ✅ **v0.1.0** | 2026-05-12 | コア MVP (Streamlit UI + 軸検索 + RAG + Docker) |
 | ✅ **v0.2.0** | 2026-05-13 | 表記ゆれ吸収 / 参照整合性チェック / マーカー方式 / pytest CI |
 | ✅ **v0.3.0** | 2026-05-13 | Next.js + FastAPI 移行、UI/UX 全面刷新、README 完全版 |
-| 🔜 **v0.4+** | 未定 | プラグイン (Embedder / LLM 差し替え)、マルチユーザー、クラウドデプロイ、SSE ストリーミング |
+| ✅ **v0.4.0** | 2026-05-13 | MCP server (stdio) — 5 read-only tools、Claude Desktop / Cowork 対応 |
+| 🔜 **v0.5+** | 未定 | Streamable HTTP transport、write tools (index_add / reindex)、OAuth 2.1 |
 
 ---
 

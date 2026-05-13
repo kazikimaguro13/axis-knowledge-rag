@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "axis-knowledge-rag": {
+      "command": "python3",
+      "args": ["-m", "mcp_server"],
+      "cwd": "/PATH/TO/axis-knowledge-rag",
+      "env": {
+        "ANTHROPIC_API_KEY": "your-key-here",
+        "GEMINI_API_KEY": "your-key-here"
+      }
+    }
+  }
+}

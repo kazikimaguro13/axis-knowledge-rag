@@ -2,12 +2,19 @@
 
 ## [Unreleased]
 
-### Day 17 (2026-05-13)
-- frontend/src/components/SearchBar.tsx: 新規 — クエリ入力 + 検索ボタン (presentational, `value`/`onChange`/`onSubmit`/`isLoading` props), `aria-label` + `aria-busy` 設定
-- frontend/src/components/AxisFilter.tsx: 新規 — `/api/axes` を `useEffect` で fetch、enum→select / integer→number input / string→text input を動的生成、`filters` を controlled prop で受け取る
-- frontend/src/components/ResultCard.tsx: 新規 — 1 件の検索結果カード (`title` / `score` / `axes` / `body_snippet` / `path` 表示)、Day 18 用に `cited` prop で `★ cited` バッジ予約
-- frontend/src/app/page.tsx: 3 コンポーネントを組み合わせ、`api.search` を叩いて結果表示。`useState` のみで `query` / `filters` / `results` / `isLoading` / `error` を管理
-- Tailwind ベースのレイアウト (`md:grid-cols-[240px_1fr]`)、空状態 / エラー / 結果件数表示の3パターン分岐
+### Day 22 (2026-05-13) — MCP server 化 (spec_022)
+- mcp_server/__init__.py: 新規 (package marker)
+- mcp_server/__main__.py: 新規。`python -m mcp_server` エントリポイント
+- mcp_server/schemas.py: Pydantic v2 入力モデル (SearchInput / AnswerInput / ListAxesInput / CheckIntegrityInput / ListDocumentsInput) + ResponseFormat enum
+- mcp_server/formatters.py: Markdown / JSON 整形ヘルパー (search / answer / axes / integrity / documents)
+- mcp_server/server.py: FastMCP ベース MCP サーバー本体 — 5 read-only tools (axis_search / axis_answer / axis_list_axes / axis_check_integrity / axis_list_documents), lazy singleton (_get_engine / _get_rag), stdio transport 対応 (logging → stderr)
+- mcp_server/tests/test_server.py: pytest smoke tests 18 件 — 全 5 tools の markdown/json 両モード、pagination、lazy init、DUMMY モードのみ使用 (CI は API キーなし)
+- pyproject.toml: `mcp>=1.2.0` を dependencies に追加、`[project.scripts]` に `axis-knowledge-rag-mcp` 登録、`setuptools.packages.find` に `mcp_server*` 追加、pytest testpaths に `mcp_server/tests` 追加
+- README.md: MCP server セクション追加 (Quickstart 直下) — Claude Desktop 設定例、tool 一覧表、docs/mcp-server.md リンク; ロードマップに v0.4.0 ✅ 追加
+- docs/mcp-server.md: 新規 — 動機・アーキテクチャ・5 tools 詳細仕様 (I/O サンプル) / Claude Desktop / Cowork / mcp-cli 組み込み手順 / DUMMY モード試験手順 / 既知制約 / 将来計画
+- docs/INDEX.md: mcp-server.md エントリ追加
+- examples/claude_desktop_config.json: 新規。Claude Desktop 組み込み設定例
+- mcp>=1.2.0 (実インストール: 1.27.1)
 
 ### Day 20 (2026-05-13)
 - README.md: v0.3 全面改稿 — shields.io バッジ (Version 0.3.0 / Next.js 14 追加)、デモ GIF placeholder、Next.js + FastAPI アーキ図 (ASCII)、デモ GIF 取得チェックリスト、ロードマップ v0.1〜v0.3 全 ✅

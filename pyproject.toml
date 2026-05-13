@@ -27,6 +27,7 @@ dependencies = [
   "streamlit>=1.37.0",
   "fastapi>=0.115.0",
   "uvicorn[standard]>=0.30.0",
+  "mcp>=1.2.0",
 ]
 
 [project.optional-dependencies]
@@ -36,16 +37,19 @@ dev = [
     "ruff>=0.5.0",
 ]
 
+[project.scripts]
+axis-knowledge-rag-mcp = "mcp_server.server:main"
+
 [project.urls]
 Homepage = "https://github.com/kazikimaguro13/axis-knowledge-rag"
 Repository = "https://github.com/kazikimaguro13/axis-knowledge-rag"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["backend*"]
+include = ["backend*", "mcp_server*"]
 
 [tool.pytest.ini_options]
-testpaths = ["backend/tests"]
+testpaths = ["backend/tests", "mcp_server/tests"]
 addopts = "-ra -q --strict-markers"
 filterwarnings = [
     "ignore::DeprecationWarning",
