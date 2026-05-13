@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+### Day 25 (2026-05-13) — Doc 整合性パス (v0.4 メタデータ統一) (spec_025)
+- pyproject.toml: `version` を `0.1.0.dev0` → `0.4.0` に更新 (実体に追従)
+- backend/src/api.py: `FastAPI(version=...)` を `_pkg_version()` 経由の動的取得に変更。`_pkg_version()` を `FastAPI(...)` 直前に移動。`/api/health` の version レスポンスも自動的に `0.4.0` を返すように
+- README.md: Version badge `0.3.0` → `0.4.0`、Status badge `v0.3` → `v0.4`。ロードマップ行の MCP 表記を「5 read-only tools」→「6 tools (5 read + 1 ingest)」に統一
+- README.md: 壊れた `![demo](examples/screenshots/demo.gif)` を削除し、Demo セクション (録画予定の注記 + 撮影チェックリストへのリンク) に置換 (方針 A 採用)。撮影チェックリストは末尾セクションに保持
+- docs/mcp-server.md: 「5 tools」表記 (L40 / 本文 / L394 / L465) を「6 tools」に統一。`axis_ingest_memo` を tool 一覧表 + 詳細 section (3-6) として追記 (I/O サンプル / annotations / DUMMY モード説明)
+- docs/mcp-server.md: `axis_list_axes` セクションの軸サンプル値を config.yml と一致 (category: `['技術記事', 'メモ', '議事録', 'ToDo']` / level: `['初級', '中級', '上級']`、`topic` を required で追記)
+- docs/mcp-server.md: テストカバレッジ表に `axis_ingest_memo` 行追加 (18 → 21 tests)
+- docs/api-reference.md: `/api/health` サンプルの version を `0.3.0` → `0.4.0` に。`/api/axes` サンプル軸値を config.yml と一致 ("技術記事/メモ/議事録/ToDo" + "初級/中級/上級" + topic を追加)
+- docs/INDEX.md: 空の `## Portfolio` セクション (portfolio-notes 残骸) を削除
+- docs/deployment.md: 「Local Docker > 起動」手順に `git fetch --tags origin` を追記 (clone 直後のタグ取得手順を明示)
+- git tag 状態: ローカル / リモート両方に v0.1.0 〜 v0.4.0 が揃っていることを確認 (`git ls-remote --tags origin` で 4 タグ全件確認)
+- 設計の意図: result_024.md (CC 総合レビュー) で指摘された B 判定要因「メタデータ不整合」を一括解消。ロジック変更ゼロ、docs と const のみ。CC レビュー再走で A 判定狙い
+
 ### Day 23 (2026-05-13) — AI ingester (memo → YAML 自動変換) (spec_023)
 - backend/src/ingester_schemas.py: 新規。Pydantic v2 — `IngestResult` (id pattern `doc_\d{3,}` / refs prefix / body min_length 等を strict validation), `IngestOptions` (knowledge_dir / suggested_category / max_tokens)
 - backend/src/ingester.py: 新規。`Ingester` クラス本体 — `rag.py` の Anthropic クライアント生成パターンを継承、`ANTHROPIC_API_KEY` 未設定 or `force_dummy=True` で DUMMY モード (sha256 derived の決定論的 mock)、`_next_doc_id` で `examples/knowledge/` を走査して連番計算、`load_axes_config()` を毎回呼んで config.yml の axes を prompt 制約として注入、`_strip_code_fence` で Claude のコードフェンス耐性、`render_markdown` で `yaml.safe_dump(sort_keys=False)` 経由の整形出力
