@@ -58,6 +58,11 @@ out/
 *.tsbuildinfo
 .npm/
 .pnpm-store/
+frontend/.env.local
+frontend/.env*.local
+!frontend/.env.local.example
+# Python の `lib/` ルール (line 13) が frontend/src/lib をマスクするので negate
+!frontend/src/lib/
 
 # === Editor / OS ===
 .idea/
