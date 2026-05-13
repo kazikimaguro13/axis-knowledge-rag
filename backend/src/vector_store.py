@@ -5,6 +5,7 @@ so that downstream search.py can filter on axes before / alongside vector
 similarity.
 """
 
+import contextlib
 import logging
 from pathlib import Path
 from typing import Any
@@ -67,7 +68,7 @@ class VectorStore:
         """Batch upsert with length validation."""
         if len(docs) != len(embeddings):
             raise ValueError("docs and embeddings length mismatch")
-        for d, e in zip(docs, embeddings):
+        for d, e in zip(docs, embeddings, strict=False):
             self.upsert(d, e)
 
     def count(self) -> int:
@@ -89,8 +90,6 @@ class VectorStore:
 
     def reset(self) -> None:
         """Drop and recreate the collection. Useful for rebuilding."""
-        try:
+        with contextlib.suppress(Exception):
             self._client.delete_collection(name=COLLECTION_NAME)
-        except Exception:  # noqa: BLE001 — Chroma raises specific error if not exists
-            pass
         self._collection = self._client.get_or_create_collection(name=COLLECTION_NAME)

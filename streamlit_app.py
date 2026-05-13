@@ -7,7 +7,6 @@ Requires the index to be built first:
     python -m scripts.build_index ./examples/knowledge --reset
 """
 
-from pathlib import Path
 from typing import Any
 
 import streamlit as st

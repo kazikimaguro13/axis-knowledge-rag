@@ -7,7 +7,7 @@ hitting the network.
 
 import hashlib
 import logging
-from typing import Sequence
+from collections.abc import Sequence
 
 from backend.src.config import settings
 

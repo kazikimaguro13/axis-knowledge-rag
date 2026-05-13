@@ -135,7 +135,6 @@ def format_report(report: IntegrityReport) -> str:
 def _main(argv: list[str]) -> int:
     import argparse
     import json
-    import sys
     from pathlib import Path
 
     from backend.src.config import configure_logging
