@@ -38,6 +38,7 @@ from mcp_server.formatters import (
 from mcp_server.schemas import (
     AnswerInput,
     CheckIntegrityInput,
+    IngestInput,
     ListAxesInput,
     ListDocumentsInput,
     ResponseFormat,
@@ -264,6 +265,63 @@ async def axis_list_documents(params: ListDocumentsInput) -> str:
         return format_documents_md(window, total, params.offset, has_more, next_offset)
     except Exception as e:
         logger.exception("axis_list_documents failed")
+        return f"Error: {type(e).__name__}: {e}"
+
+
+# ============================================================================
+# Tool 6: axis_ingest_memo
+# ============================================================================
+@mcp.tool(
+    name="axis_ingest_memo",
+    annotations=ToolAnnotations(
+        title="Convert raw memo to YAML-frontmatter Markdown",
+        readOnlyHint=True,  # Does not modify files; just returns the converted content
+        destructiveHint=False,
+        idempotentHint=False,  # Claude API is nondeterministic
+        openWorldHint=True,  # Calls Anthropic API (external)
+    ),
+)
+async def axis_ingest_memo(params: IngestInput) -> str:
+    """Convert a raw memo text into axis-knowledge-rag YAML-frontmatter Markdown.
+
+    Pipeline: read existing knowledge_dir → next doc_NNN id + existing ref list →
+    Claude fills axes/tags/title/body under strict axes_constraints from config.yml.
+    Returns rendered Markdown by default; pass `response_format='json'` for the
+    structured `IngestResult` payload plus the rendered Markdown.
+
+    DUMMY mode (no `ANTHROPIC_API_KEY`) returns a deterministic mock — useful
+    for plumbing tests but not for actual ingestion.
+    """
+    try:
+        from backend.src.ingester import Ingester, render_markdown
+        from backend.src.ingester_schemas import IngestOptions
+
+        ingester = Ingester()
+        opts = IngestOptions(
+            knowledge_dir=params.knowledge_dir,
+            suggested_category=params.suggested_category,
+            max_tokens=params.max_tokens,
+        )
+        result = ingester.ingest(params.raw_text, opts)
+        md = render_markdown(result)
+
+        if params.response_format == ResponseFormat.JSON:
+            return json.dumps(
+                {
+                    "id": result.id,
+                    "title": result.title,
+                    "axes": result.axes,
+                    "tags": result.tags,
+                    "refs": result.refs,
+                    "rendered_md": md,
+                    "is_dummy": ingester.is_dummy,
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        return md
+    except Exception as e:
+        logger.exception("axis_ingest_memo failed")
         return f"Error: {type(e).__name__}: {e}"
 
 
