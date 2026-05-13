@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Day 30 (2026-05-14) — Public README cleanup + GitHub metadata
+
+- README: 「デモ GIF 取得チェックリスト」セクション削除 (内部 TODO 表記、外部公開不適切)
+- README: 冒頭引用ブロックの撮影手順リンクを削除、Demo 文言を簡潔化
+- README: 冒頭にコメントアウト img タグを配置 (将来の demo.gif 配置時に外すだけ)
+- examples/screenshots/README.md: 新規、撮影ガイドライン
+- GitHub About description セット: "軸メタデータ × ベクトル検索 × BM25 の 3-way hybrid RAG OSS..."
+- GitHub Topics セット: 14 件 (rag / claude-api / gemini-api / mcp-server / nextjs / fastapi / vector-search / chromadb / bm25 / japanese-nlp / knowledge-management / local-first / llm / python)
+- ADR 表記 (Deciders: 中島) は設計史なので残置 (spec_030 §2 制約準拠)
+
 ### Day 29 (2026-05-14) — 3-way hybrid search (BM25 fusion) (spec_029)
 
 - backend/src/bm25_index.py: 新規。`BM25Okapi` + 文字 n-gram (n=1, 2) トークナイザ、min-max 正規化済み score を返す。`Normalizer` 統合で query 側も同じ正規化を経由

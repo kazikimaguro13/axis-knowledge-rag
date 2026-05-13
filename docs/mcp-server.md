@@ -311,7 +311,7 @@ _next offset: 5_
 
 ### 3-6. `axis_ingest_memo`
 
-生メモ (Slack 抜粋 / 議事録 / Apple Notes / プレーン Markdown) を axis-knowledge-rag 形式の YAML-frontmatter Markdown に Claude API で変換する。**ファイル書き込みなし** — 変換結果を返すだけなので read-only 扱い (中島さんがプレビューしてから手動 commit する想定)。`ANTHROPIC_API_KEY` 未設定時は DUMMY モード (決定論的 mock)。
+生メモ (Slack 抜粋 / 議事録 / Apple Notes / プレーン Markdown) を axis-knowledge-rag 形式の YAML-frontmatter Markdown に Claude API で変換する。**ファイル書き込みなし** — 変換結果を返すだけなので read-only 扱い (利用者がプレビューしてから手動 commit する想定)。`ANTHROPIC_API_KEY` 未設定時は DUMMY モード (決定論的 mock)。
 
 **Input schema:**
 
