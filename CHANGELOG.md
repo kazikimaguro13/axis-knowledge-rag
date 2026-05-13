@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+### Day 23 (2026-05-13) — AI ingester (memo → YAML 自動変換) (spec_023)
+- backend/src/ingester_schemas.py: 新規。Pydantic v2 — `IngestResult` (id pattern `doc_\d{3,}` / refs prefix / body min_length 等を strict validation), `IngestOptions` (knowledge_dir / suggested_category / max_tokens)
+- backend/src/ingester.py: 新規。`Ingester` クラス本体 — `rag.py` の Anthropic クライアント生成パターンを継承、`ANTHROPIC_API_KEY` 未設定 or `force_dummy=True` で DUMMY モード (sha256 derived の決定論的 mock)、`_next_doc_id` で `examples/knowledge/` を走査して連番計算、`load_axes_config()` を毎回呼んで config.yml の axes を prompt 制約として注入、`_strip_code_fence` で Claude のコードフェンス耐性、`render_markdown` で `yaml.safe_dump(sort_keys=False)` 経由の整形出力
+- scripts/yamlize.py: 新規。単発 CLI — stdout/-o, --suggested-category, --max-tokens, --force-dummy, stdin (`-`) 対応
+- scripts/yamlize_dir.py: 新規。バッチ CLI — `*.txt` を走査して `<doc_NNN>-<slug>.md` で出力、in-memory counter で同一バッチ内 id 衝突回避、`_slugify` は非 ASCII title 時に filename stem へフォールバック
+- examples/raw_memos/sample_memo_0[1-3].txt: 新規。Slack コピペ風 / 議事録風 / 自己ノート風の 3 サンプル
+- backend/tests/test_ingester.py: 新規。13 tests — DUMMY mode, `_next_doc_id` (empty/missing/populated dir), render_markdown round-trip (frontmatter.loads で再パース), schema validation (invalid ref / bad id pattern), `_strip_code_fence` parametrize
+- mcp_server/schemas.py: `IngestInput` を追加 (raw_text 20-10000 chars / knowledge_dir / suggested_category / max_tokens / response_format)
+- mcp_server/server.py: 6 個目の tool `axis_ingest_memo` を追加 (`openWorldHint=True` で Claude API 呼び出しを明示、json モードは `rendered_md` + `is_dummy` 含む構造体を返す)
+- mcp_server/tests/test_server.py: `axis_ingest_memo` の DUMMY mode test 3 件追加 (markdown / json / pydantic input validation)
+- docs/ingester.md: 新規。アーキ図、3 形態の使い方、軸推測 prompt 戦略、既知制約、v0.5+ ロードマップ
+- docs/INDEX.md: ingester.md エントリ追加、MCP tools 数を 5 → 6 に更新
+- README.md: Quickstart 直下に「🤖 メモを自動 YAML 化」セクション追加、MCP tools 表に `axis_ingest_memo` 追加
+- 依存追加なし (anthropic + pyyaml + pydantic は既存)
+
 ### Day 19 (2026-05-13) — Docker 分割 (backend / frontend) + E2E (spec_019)
 - Dockerfile.backend: 新規。`python:3.11-slim`、`pip install -e .`、`EXPOSE 8000`、`HEALTHCHECK` で `/api/health` を 10s 間隔ポーリング、CMD で `scripts.build_index` → `uvicorn backend.src.api:app --host 0.0.0.0 --port 8000`
 - Dockerfile.frontend: 新規。multi-stage build (`node:20-alpine` AS builder → AS runner)、`NEXT_TELEMETRY_DISABLED=1`、Next.js standalone output を runner にコピー、非 root user `nextjs:1001` で `node server.js` 起動 (`EXPOSE 3000`)
