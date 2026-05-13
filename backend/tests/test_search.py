@@ -7,20 +7,27 @@ import pytest
 from backend.src.embedder import Embedder
 from backend.src.loader import Document
 from backend.src.search import SearchEngine, SearchResult, _build_where
+from backend.src.normalizer import normalize_text
 from backend.src.vector_store import VectorStore
 
 
-def _make_doc(doc_id: str, category: str, body: str = "body text") -> Document:
+def _make_doc(doc_id: str, category: str, body: str) -> Document:
+    axes = {"category": category}
     return Document(
         id=doc_id,
-        title=f"Title {doc_id}",
-        axes={"category": category, "level": "中級"},
+        title=f"Doc {doc_id}",
+        axes=axes,
         tags=[],
         refs=[],
         body=body,
         path=Path(f"/tmp/{doc_id}.md"),
         raw_meta={},
+        normalized_title=normalize_text(f"Doc {doc_id}"),
+        normalized_body=normalize_text(body),
+        normalized_axes={k: normalize_text(str(v)) for k, v in axes.items()},
+        normalized_tags=[],
     )
+
 
 
 @pytest.fixture
