@@ -40,6 +40,16 @@ class SearchInput(_BaseInput):
         ge=1,
         le=50,
     )
+    bm25_weight: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Weight of BM25 score in the hybrid fusion with vector cosine "
+            "(0.0 = vector only, 1.0 = BM25 only). Has no effect when the "
+            "server has no BM25 index wired up."
+        ),
+    )
     response_format: ResponseFormat = Field(
         default=ResponseFormat.MARKDOWN,
         description="Output format: 'markdown' for humans, 'json' for programmatic use.",
