@@ -20,7 +20,6 @@ from mcp_server.schemas import (
     SearchInput,
 )
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -40,8 +39,8 @@ def _reset_singletons():
 @pytest.fixture
 def tmp_chroma(tmp_path: Path, monkeypatch):
     """Patch settings so VectorStore uses a tmp directory."""
+
     from backend.src import config as cfg
-    from dataclasses import replace
 
     new_settings = cfg.Settings(chroma_db_path=tmp_path / "chroma")
     monkeypatch.setattr(cfg, "settings", new_settings)

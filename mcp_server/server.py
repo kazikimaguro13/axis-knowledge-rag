@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
@@ -27,7 +26,6 @@ from backend.src.normalizer import Normalizer
 from backend.src.rag import RAGPipeline
 from backend.src.search import SearchEngine
 from backend.src.vector_store import VectorStore
-
 from mcp_server.formatters import (
     format_answer_json,
     format_answer_md,
@@ -45,7 +43,6 @@ from mcp_server.schemas import (
     ResponseFormat,
     SearchInput,
 )
-
 
 configure_logging()
 logger = logging.getLogger("axis_knowledge_rag_mcp")

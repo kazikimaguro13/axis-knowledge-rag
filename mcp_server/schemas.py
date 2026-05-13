@@ -1,12 +1,11 @@
 """Pydantic input models for the MCP server tools."""
 
-from enum import Enum
-from typing import Optional
+from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
-class ResponseFormat(str, Enum):
+class ResponseFormat(StrEnum):
     MARKDOWN = "markdown"
     JSON = "json"
 
@@ -20,7 +19,7 @@ class _BaseInput(BaseModel):
 
 
 class SearchInput(_BaseInput):
-    query: Optional[str] = Field(
+    query: str | None = Field(
         default=None,
         description=(
             "Natural-language search query (e.g., 'RAG architecture design'). "
@@ -48,7 +47,7 @@ class SearchInput(_BaseInput):
 
     @field_validator("query")
     @classmethod
-    def _empty_to_none(cls, v: Optional[str]) -> Optional[str]:
+    def _empty_to_none(cls, v: str | None) -> str | None:
         if v is not None and v.strip() == "":
             return None
         return v
