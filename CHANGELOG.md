@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Day 12 (2026-05-13)
+- pyproject.toml: add `[project.optional-dependencies].dev` with pytest>=8, pytest-cov>=5, ruff>=0.5
+- pyproject.toml: add `[tool.pytest.ini_options]`, `[tool.coverage.run/report]`, `[tool.ruff.lint]` sections
+- backend/tests/conftest.py: shared fixtures — dummy_embedder, in_memory_store (tmp_path-isolated), search_engine, sample_documents
+- backend/tests/test_*.py: convert all 8 test files to pytest style; remove __main__ runners
+- backend/tests/test_normalizer.py: 15-case parametrize table + 4-case query_matches_index parametrize
+- backend/tests/test_marker.py: parametrize for invalid-name and append-newline variants
+- backend/src/*.py + streamlit_app.py: ruff auto-fix (UP035, F401, B905, SIM105)
+- .github/workflows/ci.yml: push/PR → ruff check + pytest --cov-fail-under=70, matrix py311/py312
+- .github/workflows/docker.yml: push/PR → Docker build-only with GHA layer cache
+- Coverage: 72.49% (70% threshold met), 90 tests all PASS
+
 ### Day 11 (2026-05-13)
 - backend/src/marker.py: AUTO_GENERATED block handling — extract_blocks, update_block, strip_blocks, validate_balance
 - backend/src/marker.py: CLI entrypoint (`python -m backend.src.marker`) with --list / --update / --strip / --validate modes
