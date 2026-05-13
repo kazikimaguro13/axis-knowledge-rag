@@ -23,6 +23,14 @@
 - docs/normalizer.md: pipeline explanation, edge cases, future extensions
 - config.yml: added `lowercase: true` to normalization section
 
+### Day 6 (2026-05-13)
+- Dockerfile: python:3.11-slim base, `pip install -e .`, build_index + streamlit run on CMD
+- docker-compose.yml: app service (ports 8501:8501, env_file .env, chroma-data volume, examples/knowledge ro mount)
+- .dockerignore: exclude .git / _ai_workspace / docs / __pycache__ / .chromadb / .env / node_modules
+- examples/knowledge/06-10: 5 new sample knowledge docs (prompt-injection / evaluation-metrics / tooling-comparison / cost-estimation / future-roadmap)
+- README.md: v0.1 rewrite — shields.io badges, demo placeholder, features/quickstart/manual setup/roadmap/architecture
+- Note: doc_005 → doc_999 broken ref intentionally retained for Week 2 integrity demo
+
 ### Day 5 (2026-05-12)
 - streamlit_app.py: Streamlit UI with sidebar axis filter, search bar, answer panel, result cards
 - streamlit_app.py: @st.cache_resource for SearchEngine and RAGPipeline initialization
