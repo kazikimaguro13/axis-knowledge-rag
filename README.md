@@ -229,7 +229,7 @@ updated: 2026-05-12
 | ✅ **v0.1.0** | 2026-05-12 | コア MVP (Streamlit UI + 軸検索 + RAG + Docker) |
 | ✅ **v0.2.0** | 2026-05-13 | 表記ゆれ吸収 / 参照整合性チェック / マーカー方式 / pytest CI |
 | ✅ **v0.3.0** | 2026-05-13 | Next.js + FastAPI 移行、UI/UX 全面刷新、README 完全版 |
-| ✅ **v0.4.0** | 2026-05-13 | MCP server (stdio) — 5 read-only tools、Claude Desktop / Cowork 対応 |
+| ✅ **v0.4.0** | 2026-05-13 | MCP server (stdio) — 6 tools (5 read + 1 ingest)、Claude Desktop / Cowork 対応 |
 | 🔜 **v0.5+** | 未定 | Streamable HTTP transport、write tools (index_add / reindex)、OAuth 2.1 |
 
 ---
