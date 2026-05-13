@@ -1,6 +1,9 @@
 # marker.py — AUTO_GENERATED ブロック保護
 
+## 概要
+
 `backend/src/marker.py` は、人間が書いた Markdown に AI が自動生成した区画を **共存** させるための仕組みを提供します。
+詳細な設計判断は [design-decisions.md#adr-008](design-decisions.md#adr-008)、公開 API は [`api-reference.md`](api-reference.md#backendsrcmarker) を参照。
 
 ---
 
@@ -243,3 +246,12 @@ AI 生成部分を取り除いた human-only 版を作るユースケース：
 - **Day 12**: `pytest` 化（現在は assert ベースの自前ランナー）
 - **Day 13 / v0.4**: ビルドスクリプトで Claude API を使い `summary` ブロックを自動生成
 - **Phase 2**: ネストマーカーのサポート
+
+---
+
+## See also
+
+- [architecture.md](architecture.md) — Marker 再生成フローのデータフロー位置づけ
+- [design-decisions.md#adr-008](design-decisions.md) — マーカー方式採用の根拠 (ADR-008)
+- [api-reference.md](api-reference.md#backendsrcmarker) — `extract_blocks` / `update_block` / `strip_blocks` API
+- [INDEX.md](INDEX.md) — ドキュメント目次
