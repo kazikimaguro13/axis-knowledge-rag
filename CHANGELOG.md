@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Day 18 (2026-05-13) — AnswerPanel + 疑似ストリーミング + 出典リンク (spec_018)
+- frontend/src/components/SkeletonLoader.tsx: 新規。`animate-pulse` ベースの汎用スケルトン
+- frontend/src/components/AnswerPanel.tsx: 新規。`/api/answer` レスポンス表示用 — typewriter 風 pseudo-streaming (setInterval, 25ms 間隔 / 80 等分 step)、`[doc_NNN]` 正規表現で出典を `<a href="#doc_NNN">` に変換、`aria-live="polite"`、loading/error/empty 各 state、DUMMY mode / model 表示
+- frontend/src/components/ResultCard.tsx: `id={result.id}` を `<article>` に付与 → AnswerPanel からの anchor jump 対応、`scroll-mt-4` で固定ヘッダー余白
+- frontend/src/app/page.tsx: AnswerPanel 統合、`withRag` チェックボックス (デフォルト ON)、トグルで `/api/answer` ↔ `/api/search` 切替、`answer.cited_ids` を `ResultCard.cited` prop へ連動
+
 ### Day 22 (2026-05-13) — MCP server 化 (spec_022)
 - mcp_server/__init__.py: 新規 (package marker)
 - mcp_server/__main__.py: 新規。`python -m mcp_server` エントリポイント
