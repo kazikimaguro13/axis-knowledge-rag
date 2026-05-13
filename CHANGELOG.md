@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+### Day 29 (2026-05-14) — 3-way hybrid search (BM25 fusion) (spec_029)
+
+- backend/src/bm25_index.py: 新規。`BM25Okapi` + 文字 n-gram (n=1, 2) トークナイザ、min-max 正規化済み score を返す。`Normalizer` 統合で query 側も同じ正規化を経由
+- backend/src/search.py: `SearchEngine` に `bm25_index` パラメータ追加、`search()` に `bm25_weight: float = 0.5` を追加。`use_bm25` 判定で fusion を skip 可能 (query=None / index 未配線 / weight=0 で v0.5 互換)、fusion 時は vector を `max(top_k*2, 20)` で over-fetch して BM25 が再ランクできる候補を確保
+- backend/src/normalizer.py: `Normalizer.identity()` classmethod を追加 (テスト・docs での pass-through 用)
+- mcp_server/schemas.py: `SearchInput.bm25_weight: float` (`ge=0.0, le=1.0`, default=0.5) を追加
+- mcp_server/server.py: `axis_search` tool が `params.bm25_weight` を `engine.search` に伝搬。docstring 更新
+- backend/tests/test_bm25_index.py: 新規 8 件 — `_tokenize`、basic scoring、empty query、no matches、`__len__`、normalizer 経由、single doc edge case
+- backend/tests/test_search.py: 新規 5 件 — `bm25_weight=0.0` で v0.5 互換、`bm25_weight=1.0` で BM25-only、ranking change、index 未配線時の no-op、axis-only path での short-circuit
+- mcp_server/tests/test_server.py: `test_axis_search_with_bm25_weight` を追加 — `SearchInput.bm25_weight=0.7` が `engine.search` まで forward されることを spy で検証
+- docs/design-decisions.md: ADR-016 追加。RRF ではなく weighted sum を選んだ理由、形態素解析ではなく n-gram を選んだ理由を明示
+- docs/search-fusion.md: 新規。3-way fusion のアーキ図、`bm25_weight` チューニングガイド、設計判断 (Over-fetch / Weighted Sum / 永続化未実装) を解説
+- docs/INDEX.md: ADR 件数 15 → 16、search-fusion.md エントリ追加
+- pyproject.toml: `rank-bm25>=0.2.2` を依存追加
+- 後方互換: `bm25_weight=0.0` で v0.5 と同一結果を保証 (テストで verify)。MCP サーバ側は index を build せずに起動するため現状 no-op (配線は spec_030 予定)
+
 ### Day 27 (2026-05-13) — MCP error sanitization (内部情報漏洩防止) (spec_027)
 
 - mcp_server/_errors.py: 新規 — `make_error_response()` + `new_correlation_id()` (5 char UUID hex)
