@@ -54,24 +54,36 @@ _SYSTEM_PROMPT = """\
 """
 
 
-def _next_doc_id(knowledge_dir: Path) -> str:
-    """Read existing knowledge dir, return 'doc_NNN' where NNN = max+1."""
+def _scan_knowledge_dir(knowledge_dir: Path) -> tuple[str, list[str]]:
+    """Single-scan helper: returns (next_doc_id, existing_doc_ids).
+
+    Replaces the previous pair of `_next_doc_id` + `_existing_doc_ids`, which
+    each called `load_directory()` independently and therefore parsed every
+    frontmatter twice per ingest. Consolidating to one scan halves the I/O
+    on batch ingestion (`yamlize_dir.py`).
+    """
     if not knowledge_dir.exists():
-        return "doc_001"
+        return "doc_001", []
     docs = load_directory(knowledge_dir)
     numbers: list[int] = []
+    ids: list[str] = []
     for d in docs:
+        ids.append(d.id)
         if d.id.startswith("doc_"):
             with contextlib.suppress(ValueError):
                 numbers.append(int(d.id[4:]))
     nxt = (max(numbers) + 1) if numbers else 1
-    return f"doc_{nxt:03d}"
+    return f"doc_{nxt:03d}", ids
+
+
+def _next_doc_id(knowledge_dir: Path) -> str:
+    """Back-compat wrapper that returns only the next id from `_scan_knowledge_dir`."""
+    return _scan_knowledge_dir(knowledge_dir)[0]
 
 
 def _existing_doc_ids(knowledge_dir: Path) -> list[str]:
-    if not knowledge_dir.exists():
-        return []
-    return [d.id for d in load_directory(knowledge_dir)]
+    """Back-compat wrapper that returns only existing ids from `_scan_knowledge_dir`."""
+    return _scan_knowledge_dir(knowledge_dir)[1]
 
 
 def _dummy_result(raw_text: str, next_id: str) -> IngestResult:
@@ -125,12 +137,11 @@ class Ingester:
     ) -> IngestResult:
         opts = options or IngestOptions()
         knowledge_dir = Path(opts.knowledge_dir)
-        next_id = _next_doc_id(knowledge_dir)
+        next_id, existing_ids = _scan_knowledge_dir(knowledge_dir)
 
         if self._use_dummy:
             return _dummy_result(raw_text, next_id)
 
-        existing_ids = _existing_doc_ids(knowledge_dir)
         axes_cfg = load_axes_config()
         constraints = axes_cfg.get("axes", [])
 
@@ -139,7 +150,7 @@ class Ingester:
             if opts.suggested_category
             else ""
         )
-        user_msg = (
+        base_user_msg = (
             f"# next_id\n{next_id}\n\n"
             f"# existing_doc_ids\n{existing_ids}\n\n"
             f"# axes_constraints\n{json.dumps(constraints, ensure_ascii=False, indent=2)}\n\n"
@@ -147,22 +158,40 @@ class Ingester:
             f"# raw_text\n{raw_text}\n"
         )
 
-        resp = self._client.messages.create(
-            model=self._model,
-            max_tokens=opts.max_tokens,
-            system=_SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": user_msg}],
-        )
-        raw_json = "".join(b.text for b in resp.content if hasattr(b, "text"))
-        raw_json = _strip_code_fence(raw_json)
+        user_msg = base_user_msg
+        last_error: Exception | None = None
+        attempts = opts.retry_count + 1
+        for attempt in range(attempts):
+            resp = self._client.messages.create(
+                model=self._model,
+                max_tokens=opts.max_tokens,
+                system=_SYSTEM_PROMPT,
+                messages=[{"role": "user", "content": user_msg}],
+            )
+            raw_json = "".join(b.text for b in resp.content if hasattr(b, "text"))
+            raw_json = _strip_code_fence(raw_json)
 
-        try:
-            data = json.loads(raw_json)
-            return IngestResult(**data)
-        except (json.JSONDecodeError, ValidationError) as e:
-            raise RuntimeError(
-                f"Claude returned invalid JSON: {e}\nRaw: {raw_json[:500]}"
-            ) from e
+            try:
+                data = json.loads(raw_json)
+                return IngestResult(**data)
+            except (json.JSONDecodeError, ValidationError) as e:
+                last_error = e
+                logger.warning(
+                    "Ingest attempt %d/%d failed: %s", attempt + 1, attempts, e
+                )
+                if attempt < attempts - 1:
+                    # Feed the previous error back to Claude so the next attempt
+                    # can self-correct. Keep the body short to avoid token bloat.
+                    user_msg = (
+                        f"{base_user_msg}\n"
+                        f"# previous_attempt_failed\n"
+                        f"Previous response was invalid JSON ({type(e).__name__}: {e}).\n"
+                        f"Return ONLY valid JSON matching the schema — no code fences, no commentary.\n"
+                    )
+
+        raise RuntimeError(
+            f"Claude returned invalid JSON after {attempts} attempts: {last_error}"
+        )
 
 
 def render_markdown(result: IngestResult) -> str:
