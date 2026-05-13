@@ -6,8 +6,8 @@ import pytest
 
 from backend.src.embedder import Embedder
 from backend.src.loader import Document
-from backend.src.search import SearchEngine, SearchResult, _build_where
 from backend.src.normalizer import normalize_text
+from backend.src.search import SearchEngine, SearchResult, _build_where
 from backend.src.vector_store import VectorStore
 
 
