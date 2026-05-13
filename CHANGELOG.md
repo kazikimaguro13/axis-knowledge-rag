@@ -2,13 +2,13 @@
 
 ## [Unreleased]
 
-### Day 13 (2026-05-13)
-- docs/architecture.md: system architecture (ASCII + Mermaid component diagram, 3 data-flow scenarios, component responsibility table, test/deploy sections)
-- docs/design-decisions.md: 12 ADRs (LangChain-free, ChromaDB, dataclass-over-pydantic, Streamlit-then-Next.js, DUMMY mode, axis_* flattening, normalized_* fields, AUTO_GENERATED markers, pytest+ruff only, Claude+Gemini split, _ai_workspace bridge, no-chunking Week 1)
-- docs/api-reference.md: hand-written module-by-module reference for config / loader / normalizer / embedder / vector_store / search / rag / integrity / marker
-- docs/INDEX.md: documentation index with reader-path guidance
-- docs/normalizer.md / integrity.md / marker.md: align opening structure, add "See also" footers cross-linking architecture / design-decisions / api-reference / INDEX
-- README.md: add 📚 Documentation section linking to docs/
+### Day 15 (2026-05-13)
+- backend/src/schemas.py: Pydantic v2 schemas — HealthResponse, AxisDef, AxesResponse, SearchRequest, SearchResultPayload, SearchResponse, AnswerRequest, AnswerResponse
+- backend/src/api.py: FastAPI app with lifespan init (SearchEngine + RAGPipeline 1回のみ), 4 endpoints: GET /api/health, GET /api/axes, POST /api/search, POST /api/answer
+- backend/src/api.py: CORS middleware (localhost:3000, localhost:8501), Swagger UI at /api/docs
+- backend/tests/test_api.py: 4 TestClient tests (health, search_empty, answer_dummy, axes) — all PASS
+- backend/requirements.txt + pyproject.toml: fastapi>=0.115.0, uvicorn[standard]>=0.30.0 追加
+- docs/api-reference.md: 4 endpoint の仕様、起動方法、CORS 設定を記載
 
 ### Day 12 (2026-05-13)
 - pyproject.toml: add `[project.optional-dependencies].dev` with pytest>=8, pytest-cov>=5, ruff>=0.5
