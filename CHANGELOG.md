@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Day 15 (2026-05-13)
+- backend/src/schemas.py: Pydantic v2 schemas — HealthResponse, AxisDef, AxesResponse, SearchRequest, SearchResultPayload, SearchResponse, AnswerRequest, AnswerResponse
+- backend/src/api.py: FastAPI app with lifespan init (SearchEngine + RAGPipeline 1回のみ), 4 endpoints: GET /api/health, GET /api/axes, POST /api/search, POST /api/answer
+- backend/src/api.py: CORS middleware (localhost:3000, localhost:8501), Swagger UI at /api/docs
+- backend/tests/test_api.py: 4 TestClient tests (health, search_empty, answer_dummy, axes) — all PASS
+- backend/requirements.txt + pyproject.toml: fastapi>=0.115.0, uvicorn[standard]>=0.30.0 追加
+- docs/api-reference.md: 4 endpoint の仕様、起動方法、CORS 設定を記載
+
 ### Day 12 (2026-05-13)
 - pyproject.toml: add `[project.optional-dependencies].dev` with pytest>=8, pytest-cov>=5, ruff>=0.5
 - pyproject.toml: add `[tool.pytest.ini_options]`, `[tool.coverage.run/report]`, `[tool.ruff.lint]` sections
