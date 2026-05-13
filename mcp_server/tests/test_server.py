@@ -14,6 +14,7 @@ from mcp_server import server as srv
 from mcp_server.schemas import (
     AnswerInput,
     CheckIntegrityInput,
+    IngestInput,
     ListAxesInput,
     ListDocumentsInput,
     ResponseFormat,
@@ -292,3 +293,51 @@ async def test_axis_list_documents_filters(populated_engine):
     result = await srv.axis_list_documents(params)
     data = json.loads(result)
     assert data["total"] >= 0
+
+
+# ---------------------------------------------------------------------------
+# Test: axis_ingest_memo (DUMMY mode — no API key)
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def empty_knowledge_dir(tmp_path: Path) -> Path:
+    d = tmp_path / "kd"
+    d.mkdir()
+    return d
+
+
+@pytest.mark.asyncio
+async def test_axis_ingest_memo_markdown(empty_knowledge_dir: Path):
+    params = IngestInput(
+        raw_text="これは MCP 経由の DUMMY ingest テスト用のメモ本文です。",
+        knowledge_dir=str(empty_knowledge_dir),
+    )
+    result = await srv.axis_ingest_memo(params)
+    assert isinstance(result, str)
+    assert result.startswith("---\n")
+    assert "id: doc_001" in result
+    assert "DUMMY mode" in result
+
+
+@pytest.mark.asyncio
+async def test_axis_ingest_memo_json(empty_knowledge_dir: Path):
+    params = IngestInput(
+        raw_text="JSON モードの DUMMY ingest テスト用のメモ本文サンプル。",
+        knowledge_dir=str(empty_knowledge_dir),
+        response_format=ResponseFormat.JSON,
+    )
+    result = await srv.axis_ingest_memo(params)
+    data = json.loads(result)
+    assert data["id"] == "doc_001"
+    assert "rendered_md" in data
+    assert data["is_dummy"] is True
+    assert data["axes"]["category"] == "メモ"
+
+
+@pytest.mark.asyncio
+async def test_axis_ingest_memo_input_validation():
+    from pydantic import ValidationError
+
+    # min_length=20 should be enforced by Pydantic
+    with pytest.raises(ValidationError):
+        IngestInput(raw_text="short")
