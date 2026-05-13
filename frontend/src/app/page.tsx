@@ -1,15 +1,18 @@
 "use client";
 
 import { useState } from "react";
+import AnswerPanel from "@/components/AnswerPanel";
 import AxisFilter from "@/components/AxisFilter";
 import ResultCard from "@/components/ResultCard";
 import SearchBar from "@/components/SearchBar";
-import { api, SearchResultPayload } from "@/lib/api";
+import { api, AnswerResponse, SearchResultPayload } from "@/lib/api";
 
 export default function HomePage() {
   const [query, setQuery] = useState("");
   const [filters, setFilters] = useState<Record<string, string | number>>({});
   const [results, setResults] = useState<SearchResultPayload[]>([]);
+  const [answer, setAnswer] = useState<AnswerResponse | null>(null);
+  const [withRag, setWithRag] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -19,9 +22,16 @@ export default function HomePage() {
     }
     setIsLoading(true);
     setError(null);
+    setAnswer(null);
     try {
-      const r = await api.search({ query: query || null, filters, top_k: 10 });
-      setResults(r.results);
+      if (withRag && query) {
+        const ans = await api.answer({ question: query, filters, top_k: 5 });
+        setAnswer(ans);
+        setResults(ans.sources);
+      } else {
+        const r = await api.search({ query: query || null, filters, top_k: 10 });
+        setResults(r.results);
+      }
     } catch (e) {
       setError(String(e));
       setResults([]);
@@ -41,13 +51,35 @@ export default function HomePage() {
           onSubmit={handleSearch}
           isLoading={isLoading}
         />
-        {error && <div className="rounded bg-red-50 p-2 text-sm text-red-700">{error}</div>}
+
+        <label className="flex items-center gap-2 text-sm text-slate-700">
+          <input
+            type="checkbox"
+            checked={withRag}
+            onChange={(e) => setWithRag(e.target.checked)}
+          />
+          RAG 回答も生成する (<code>/api/answer</code>)
+        </label>
+
+        <AnswerPanel
+          text={answer?.text ?? ""}
+          citedIds={answer?.cited_ids ?? []}
+          isLoading={isLoading && withRag && !!query}
+          isDummy={answer?.is_dummy ?? false}
+          model={answer?.model ?? null}
+          error={error}
+        />
+
         {results.length > 0 && (
-          <p className="text-sm text-slate-500">{results.length} 件の結果</p>
+          <p className="text-sm text-slate-500">📚 関連資料 {results.length} 件</p>
         )}
         <div className="space-y-3">
           {results.map((r) => (
-            <ResultCard key={r.id} result={r} />
+            <ResultCard
+              key={r.id}
+              result={r}
+              cited={answer?.cited_ids?.includes(r.id) ?? false}
+            />
           ))}
         </div>
         {!isLoading && results.length === 0 && !error && (
