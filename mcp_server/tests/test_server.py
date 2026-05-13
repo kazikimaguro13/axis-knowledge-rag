@@ -296,6 +296,85 @@ async def test_axis_list_documents_filters(populated_engine):
 
 
 # ---------------------------------------------------------------------------
+# spec_026: axis_list_documents pagination above 200 (was previously capped)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def large_engine(tmp_chroma: Path) -> SearchEngine:
+    """Engine pre-populated with 250 docs to exercise the no-cap pagination."""
+    store = VectorStore(path=tmp_chroma / "chroma")
+    embedder = Embedder(force_dummy=True)
+    normalizer = Normalizer.from_config({"axes": []})
+    engine = SearchEngine(store, embedder, normalizer)
+
+    docs = [
+        Document(
+            id=f"doc_{i:04d}",
+            title=f"Document {i}",
+            axes={"category": "bulk"},
+            tags=["bulk"],
+            refs=[],
+            body=f"Body for document {i}.",
+            path=Path(f"/tmp/doc_{i:04d}.md"),
+        )
+        for i in range(250)
+    ]
+    embeddings = embedder.embed_batch([d.body for d in docs])
+    store.upsert_many(docs, embeddings)
+    srv._engine = engine
+    return engine
+
+
+@pytest.mark.asyncio
+async def test_axis_list_documents_total_above_200(large_engine):
+    """Total must reflect the real count (250), not the old 200-row cap."""
+    params = ListDocumentsInput(
+        limit=10, offset=0, response_format=ResponseFormat.JSON
+    )
+    result = await srv.axis_list_documents(params)
+    data = json.loads(result)
+    assert data["total"] == 250
+    assert data["count"] == 10
+    assert data["has_more"] is True
+
+
+@pytest.mark.asyncio
+async def test_axis_list_documents_offset_above_200(large_engine):
+    """Pagination must work past the previously-imposed 200-row ceiling."""
+    params = ListDocumentsInput(
+        limit=20, offset=210, response_format=ResponseFormat.JSON
+    )
+    result = await srv.axis_list_documents(params)
+    data = json.loads(result)
+    assert data["total"] == 250
+    assert data["offset"] == 210
+    assert data["count"] == 20
+    assert data["has_more"] is True
+    assert data["next_offset"] == 230
+
+
+@pytest.mark.asyncio
+async def test_axis_list_documents_error_message_is_sanitized(monkeypatch):
+    """When an internal exception fires, the response must not leak details."""
+
+    class _BrokenStore:
+        def count_with_filter(self, where=None):
+            raise RuntimeError("internal stack trace with sensitive path /etc/passwd")
+
+    class _BrokenEngine:
+        _store = _BrokenStore()
+        _normalizer = Normalizer.from_config({"axes": []})
+
+    monkeypatch.setattr(srv, "_get_engine", lambda: _BrokenEngine())
+    params = ListDocumentsInput(limit=5, offset=0, response_format=ResponseFormat.JSON)
+    result = await srv.axis_list_documents(params)
+    assert "RuntimeError" not in result
+    assert "/etc/passwd" not in result
+    assert "Error" in result
+
+
+# ---------------------------------------------------------------------------
 # Test: axis_ingest_memo (DUMMY mode — no API key)
 # ---------------------------------------------------------------------------
 
