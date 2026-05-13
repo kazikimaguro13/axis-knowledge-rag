@@ -2,13 +2,12 @@
 
 ## [Unreleased]
 
-### Day 6 (2026-05-13)
-- Dockerfile: Python 3.11-slim ベース、build_index → streamlit run の単一コンテナ起動
-- docker-compose.yml: `docker compose up` 一発起動、`chroma-data` named volume で ChromaDB 永続化
-- .dockerignore: `_ai_workspace/`, `docs/`, `.chromadb/`, `.env`, `.git/` などを除外
-- examples/knowledge: 5 本 → 10 本に拡充 (06-prompt-injection, 07-evaluation-metrics, 08-tooling-comparison, 09-cost-estimation, 10-future-roadmap)
-- examples/knowledge/05: 既存の壊れリンク `doc_999` は Week 2 検証用にそのまま残置
-- README.md: v0.1 全面改稿 — タイトル / バッジ / デモ画像 / 特徴 / Quickstart / 手動セットアップ / Markdown 書式 / 環境変数 / ロードマップ / アーキテクチャ図 / ライセンス / 作者
+### Day 11 (2026-05-13)
+- backend/src/marker.py: AUTO_GENERATED block handling — extract_blocks, update_block, strip_blocks, validate_balance
+- backend/src/marker.py: CLI entrypoint (`python -m backend.src.marker`) with --list / --update / --strip / --validate modes
+- backend/tests/test_marker.py: 31 tests covering extract, update, strip, validate, nested DOTALL, CRLF, CLI modes
+- examples/knowledge/01-rag-patterns.md: demo AUTO_GENERATED summary block (placeholder for Day 13 build script)
+- docs/marker.md: design rationale, ASCII diagram, API reference, CLI usage, recommended block names
 
 ### Day 10 (2026-05-12)
 - backend/src/integrity.py: IntegrityChecker with broken_refs, orphan_docs, cycle detection
