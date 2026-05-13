@@ -1,6 +1,7 @@
 """Smoke tests for mcp_server tools (DUMMY mode, no API keys required)."""
 
 import json
+import logging
 from pathlib import Path
 
 import pytest
@@ -341,3 +342,65 @@ async def test_axis_ingest_memo_input_validation():
     # min_length=20 should be enforced by Pydantic
     with pytest.raises(ValidationError):
         IngestInput(raw_text="short")
+
+
+# ---------------------------------------------------------------------------
+# Test: error sanitization — no internal details leak to MCP client
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_axis_search_error_is_sanitized(monkeypatch, caplog):
+    """When search fails, the tool returns a sanitized string with a corr_id."""
+    def boom(*a, **kw):
+        raise ValueError("Internal value /secret/path leaked")
+    monkeypatch.setattr(srv, "_get_engine", boom)
+
+    with caplog.at_level(logging.ERROR):
+        out = await srv.axis_search(SearchInput(query="x"))
+
+    # Response must NOT contain internal details
+    assert "secret" not in out
+    assert "/path" not in out
+    assert "ValueError" not in out
+
+    # Response is the sanitized format
+    assert "axis_search failed" in out
+    assert "correlation id" in out
+
+    # Full exception must appear in the logs
+    assert "ValueError" in caplog.text or "Internal value" in caplog.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "tool_name,tool_callable,input_factory",
+    [
+        ("axis_search",          lambda: srv.axis_search,          lambda: SearchInput(query="x")),
+        ("axis_answer",          lambda: srv.axis_answer,          lambda: AnswerInput(question="x")),
+        ("axis_list_axes",       lambda: srv.axis_list_axes,       lambda: ListAxesInput()),
+        ("axis_check_integrity", lambda: srv.axis_check_integrity, lambda: CheckIntegrityInput()),
+        ("axis_list_documents",  lambda: srv.axis_list_documents,  lambda: ListDocumentsInput()),
+        ("axis_ingest_memo",     lambda: srv.axis_ingest_memo,     lambda: IngestInput(raw_text="x" * 30)),
+    ],
+)
+async def test_all_tools_error_sanitized(tool_name, tool_callable, input_factory, monkeypatch):
+    """Every tool's error path returns a sanitized response without internal details."""
+    def _bomb(*a, **kw):
+        raise ZeroDivisionError("division by zero")
+
+    # Patch all lazy singletons and loader so every tool path hits an error
+    monkeypatch.setattr(srv, "_get_engine", _bomb)
+    monkeypatch.setattr(srv, "_get_rag", _bomb)
+    monkeypatch.setattr(srv, "_get_axes", _bomb)
+    monkeypatch.setattr(srv, "load_directory", _bomb)
+
+    # axis_ingest_memo uses a local import; patch at the source module
+    import backend.src.ingester as _ingester_mod
+    monkeypatch.setattr(_ingester_mod, "Ingester", _bomb)
+
+    out = await tool_callable()(input_factory())
+
+    assert "ZeroDivisionError" not in out
+    assert "division by zero" not in out
+    assert "failed" in out
+    assert "correlation id" in out
