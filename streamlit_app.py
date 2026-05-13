@@ -14,6 +14,7 @@ import streamlit as st
 
 from backend.src.config import configure_logging, load_axes_config, settings
 from backend.src.embedder import Embedder
+from backend.src.normalizer import Normalizer
 from backend.src.rag import RAGPipeline
 from backend.src.search import SearchEngine
 from backend.src.vector_store import VectorStore
@@ -32,7 +33,8 @@ st.set_page_config(
 def get_pipeline() -> tuple[SearchEngine, RAGPipeline]:
     store = VectorStore(path=settings.chroma_db_path)
     embedder = Embedder()
-    engine = SearchEngine(store, embedder)
+    normalizer = Normalizer.from_config(load_axes_config())
+    engine = SearchEngine(store, embedder, normalizer)
     rag = RAGPipeline(engine)
     return engine, rag
 
