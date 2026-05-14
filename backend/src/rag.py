@@ -6,10 +6,10 @@ preserving source document IDs for downstream UI rendering.
 
 import logging
 import os
-import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from backend.src._citations import parse_and_validate_citations
 from backend.src.config import load_app_config, settings
 from backend.src.conversation import (
     ConversationStore,
@@ -25,16 +25,19 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_MODEL = os.getenv("CLAUDE_MODEL", "claude-3-5-sonnet-20241022")
 
+# Index-based citation marker `[N]` (1-indexed, matches the position of a
+# source in the prompt's `## 出典 N` blocks). See ADR-020.
 SYSTEM_PROMPT = """\
 あなたは知識ベース検索エンジンの回答生成エージェントです。
 ユーザーの質問に対して、提供された Document の内容**のみ**から回答してください。
 提供された文書に書かれていないことは「資料には記載がない」と答えてください。
 
 回答ルール:
-1. 回答中で参照した Document は必ず `[doc_NNN]` 形式で本文中にマークしてください
-2. 複数 Document を参照した場合は `[doc_001][doc_004]` のように並べる
-3. 推測や一般論を加えず、Document の内容を要約・引用する形にする
-4. 出典が無い質問への回答は「提供された資料には記載がありません」と短く答える
+1. 出典に基づく主張の文末に `[N]` を付けてください (N は 1 始まり、出典リストの index と一致)
+2. 複数の出典が同じ主張を裏付ける場合は `[1][2]` のように連続させてください
+3. 出典に書かれていない一般論や前置きには `[N]` を付けないでください
+4. 推測や一般論を加えず、Document の内容を要約・引用する形にする
+5. 出典が無い質問への回答は「提供された資料には記載がありません」と短く答える
 
 簡潔で読みやすい日本語で答えてください。
 """
@@ -45,15 +48,14 @@ CHAT_SYSTEM_PROMPT = """\
 
 回答ルール:
 1. 答えは検索でヒットしたドキュメントに書かれた内容に忠実に
-2. 回答中で参照した Document は必ず `[doc_NNN]` 形式で本文中にマークしてください
-3. 履歴と矛盾する内容があった場合、履歴ではなくドキュメントに従う
-4. 履歴は文脈把握 (代名詞解決・話題継続) のためだけに使う
-5. 出典が無い場合は「提供された資料には記載がありません」と短く答える
+2. 出典に基づく主張の文末に `[N]` を付けてください (N は 1 始まり、出典リストの index と一致)
+3. 複数の出典が同じ主張を裏付ける場合は `[1][2]` のように連続させてください
+4. 履歴と矛盾する内容があった場合、履歴ではなくドキュメントに従う
+5. 履歴は文脈把握 (代名詞解決・話題継続) のためだけに使う
+6. 出典が無い場合は「提供された資料には記載がありません」と短く答える
 
 簡潔で読みやすい日本語で答えてください。
 """
-
-CITATION_RE = re.compile(r"\[(doc_\d+)\]")
 
 
 @dataclass
@@ -138,7 +140,7 @@ def _dummy_answer(question: str, results: list[SearchResult]) -> Answer:
     cited = [results[0].id]
     text = (
         f"[DUMMY ANSWER] 質問「{question}」に対し、"
-        f"資料 [{results[0].id}] (「{results[0].title}」) が最も関連しています。"
+        f"資料「{results[0].title}」が最も関連しています[1]。"
         f" 抜粋: {results[0].body_snippet[:120]}..."
     )
     return Answer(
@@ -197,7 +199,7 @@ class RAGPipeline:
         user_msg = (
             f"# 質問\n{question}\n\n"
             f"# 提供された資料 (上位 {len(results)} 件)\n\n{context}\n\n"
-            "上記の資料のみを根拠に、出典マーク [doc_NNN] を付けて回答してください。"
+            "上記の資料のみを根拠に、出典マーク [N] (N は 1 始まり、上の 出典 i の i と一致) を付けて回答してください。"
         )
         resp = self._client.messages.create(
             model=self._model,
@@ -205,8 +207,9 @@ class RAGPipeline:
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": user_msg}],
         )
-        text = "".join(block.text for block in resp.content if hasattr(block, "text"))
-        cited_ids = sorted(set(CITATION_RE.findall(text)))
+        raw = "".join(block.text for block in resp.content if hasattr(block, "text"))
+        text, used = parse_and_validate_citations(raw, n_sources=len(results))
+        cited_ids = [results[i].id for i in sorted(used)]
         return Answer(
             text=text,
             sources=results,
@@ -321,7 +324,7 @@ class RAGPipeline:
                 "content": (
                     f"# 質問\n{question}\n\n"
                     f"# 提供された資料 (上位 {len(results)} 件)\n\n{context}\n\n"
-                    "上記の資料のみを根拠に、出典マーク [doc_NNN] を付けて回答してください。"
+                    "上記の資料のみを根拠に、出典マーク [N] (N は 1 始まり、上の 出典 i の i と一致) を付けて回答してください。"
                 ),
             }
         )
@@ -331,8 +334,9 @@ class RAGPipeline:
             system=CHAT_SYSTEM_PROMPT,
             messages=messages,
         )
-        text = "".join(block.text for block in resp.content if hasattr(block, "text"))
-        cited_ids = sorted(set(CITATION_RE.findall(text)))
+        raw = "".join(block.text for block in resp.content if hasattr(block, "text"))
+        text, used = parse_and_validate_citations(raw, n_sources=len(results))
+        cited_ids = [results[i].id for i in sorted(used)]
         return Answer(
             text=text,
             sources=results,

@@ -157,8 +157,8 @@ RAG 回答生成。検索 + Claude による回答文を返す。`ANTHROPIC_API_
 
 ```json
 {
-  "text": "RAGとは Retrieval-Augmented Generation の略で...[doc_001]...",
-  "cited_ids": ["doc_001"],
+  "text": "RAGとは Retrieval-Augmented Generation の略です[1]。BM25 とベクトル検索のハイブリッドが推奨されます[2]。",
+  "cited_ids": ["doc_001", "doc_002"],
   "sources": [
     {
       "id": "doc_001",
@@ -168,6 +168,15 @@ RAG 回答生成。検索 + Claude による回答文を返す。`ANTHROPIC_API_
       "body_snippet": "...",
       "path": "examples/knowledge/01-rag-patterns.md",
       "refs": ["doc_002"]
+    },
+    {
+      "id": "doc_002",
+      "title": "ハイブリッド検索",
+      "score": 0.81,
+      "axes": {"category": "技術記事"},
+      "body_snippet": "...",
+      "path": "examples/knowledge/02-hybrid-search.md",
+      "refs": []
     }
   ],
   "is_dummy": false,
@@ -177,11 +186,18 @@ RAG 回答生成。検索 + Claude による回答文を返す。`ANTHROPIC_API_
 
 | フィールド | 型 | 説明 |
 |---|---|---|
-| `text` | string | 生成された回答文 (`[doc_NNN]` 形式の出典 ID を含む) |
-| `cited_ids` | array | 回答中で引用された ID 一覧 |
-| `sources` | array | 検索結果一覧 (SearchResult と同形式) |
+| `text` | string | 生成された回答文。出典に基づく文末に `[N]` (1-indexed) インライン引用マーカーが付く。`N` は `sources[N-1]` を指す ([ADR-020](adr/ADR-020-citation-highlighting.md)) |
+| `cited_ids` | array | 回答中で実際に引用された `sources[].id` の一覧 (`[N]` を解決した後のもの) |
+| `sources` | array | 検索結果一覧 (SearchResult と同形式)。`[N]` の N は `sources` のインデックス + 1 |
 | `is_dummy` | boolean | DUMMY モードで生成された場合 true |
 | `model` | string | 使用した Claude モデル名。DUMMY 時は `"dummy"` |
+
+> **出典の出ない回答**: LLM が `[N]` を出さなかった場合 (例: 「資料には記載がありません」) は
+> `cited_ids` が空配列になる。テキスト自体は valid。
+
+> **out-of-range marker**: LLM が誤って `[9]` のような範囲外の N を返した場合、
+> サーバ側で silently strip される (警告ログのみ)。クライアントに届くテキストには
+> 有効な `[N]` のみが残る。
 
 **Errors**: 422 — バリデーションエラー (question が空など) / 500 — RAG pipeline failure
 
@@ -220,7 +236,7 @@ RAG 回答生成。検索 + Claude による回答文を返す。`ANTHROPIC_API_
   "session_id": "a1b2c3d4-7e8f-...",
   "question": "それの利点は？",
   "rewritten_question": "RAG の利点は？",
-  "answer": "RAG の主な利点は...[doc_001]...",
+  "answer": "RAG の主な利点は...[1]...",
   "cited_ids": ["doc_001"],
   "sources": [ /* SearchResult と同形式 */ ],
   "is_dummy": false,

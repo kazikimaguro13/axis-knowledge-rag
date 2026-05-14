@@ -172,6 +172,71 @@ def test_chat_no_rewrite_when_history_empty(rag_pipeline: RAGPipeline) -> None:
     assert resp.rewritten_question is None
 
 
+# ---------------------------------------------------------------------------
+# spec_034: [N] citation marker end-to-end
+# ---------------------------------------------------------------------------
+
+
+class _FakeBlock:
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+
+class _FakeResponse:
+    def __init__(self, text: str) -> None:
+        self.content = [_FakeBlock(text)]
+
+
+class _FakeMessages:
+    def __init__(self, text: str) -> None:
+        self._text = text
+
+    def create(self, **_kw):  # noqa: ANN003
+        return _FakeResponse(self._text)
+
+
+class _FakeAnthropic:
+    def __init__(self, text: str) -> None:
+        self.messages = _FakeMessages(text)
+
+
+def _make_real_pipeline(
+    rag_pipeline: RAGPipeline, claude_reply: str
+) -> RAGPipeline:
+    """Flip a dummy pipeline into 'real' mode with a stubbed Claude client."""
+    rag_pipeline._use_dummy = False  # noqa: SLF001
+    rag_pipeline._client = _FakeAnthropic(claude_reply)  # noqa: SLF001
+    return rag_pipeline
+
+
+def test_answer_maps_n_markers_to_source_ids(rag_pipeline: RAGPipeline) -> None:
+    rag = _make_real_pipeline(
+        rag_pipeline, "First fact[1]. Second fact[2]."
+    )
+    ans = rag.answer("dummy question", top_k=2)
+    # [1] -> sources[0].id, [2] -> sources[1].id
+    assert ans.cited_ids == [ans.sources[0].id, ans.sources[1].id]
+    assert "[1]" in ans.text and "[2]" in ans.text
+    assert ans.is_dummy is False
+
+
+def test_answer_strips_out_of_range_n_marker(rag_pipeline: RAGPipeline) -> None:
+    rag = _make_real_pipeline(
+        rag_pipeline, "Real claim[1]. Fake claim[9]."
+    )
+    ans = rag.answer("dummy question", top_k=2)
+    assert "[9]" not in ans.text
+    assert "[1]" in ans.text
+    assert ans.cited_ids == [ans.sources[0].id]
+
+
+def test_answer_canonicalises_csv_marker(rag_pipeline: RAGPipeline) -> None:
+    rag = _make_real_pipeline(rag_pipeline, "Both back this[1, 2].")
+    ans = rag.answer("dummy question", top_k=2)
+    assert "[1][2]" in ans.text
+    assert set(ans.cited_ids) == {ans.sources[0].id, ans.sources[1].id}
+
+
 def test_build_context_respects_max_chars_budget() -> None:
     from backend.src.rag import build_context
     from backend.src.search import SearchResult

@@ -24,6 +24,7 @@ YAML frontmatter 付き Markdown ナレッジに対する、**軸メタデータ
 - 🎯 **軸メタデータ + ベクトル検索の hybrid** — `category` / `topic` / `level` などの構造化軸で絞り込みつつ、自然文クエリで意味検索
 - 🧩 **Parent Document Retrieval (Small-to-Big)** — 検索は H2 配下の小チャンク粒度、回答は H2 セクション全文を LLM に渡すので精度と文脈を両立 (v0.7, [ADR-017](docs/adr/ADR-017-parent-document-retrieval.md))
 - 💬 **Conversational RAG (履歴保持チャット)** — `/api/chat` で session_id を keep すれば follow-up 質問が成立。Gemini Flash で代名詞を含む質問を standalone クエリに自動 rewrite (v0.7, [ADR-018](docs/adr/ADR-018-conversational-rag.md))
+- 🔗 **In-Text Citation Highlighting** — 回答文中の `[N]` インライン引用マーカーをクリックすると対応する出典カードが黄色フラッシュ + scroll-into-view。Perplexity 風の UX を最小コストで実現 (v0.7, [ADR-020](docs/adr/ADR-020-citation-highlighting.md))
 - 🕐 **Time-Weighted Decay** (opt-in) — frontmatter の `updated` 日付を元に指数減衰係数を掛け、新しい文書を僅かに優遇。`config.yml` で `enabled: true` にすると有効 (v0.7, [ADR-021](docs/adr/ADR-021-time-weighted-decay.md))
 - 🇯🇵 **日本語ナレッジ特化** — 表記ゆれ吸収 (NFKC + カナ統一 + lowercase) 標準搭載
 - 🔌 **LangChain / LlamaIndex 不使用、自前実装** — 依存が薄く、内部挙動が読める。Embedder / VectorStore / RAG Pipeline を必要最小限の薄いラッパで構成
