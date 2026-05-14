@@ -8,7 +8,12 @@ from importlib.metadata import PackageNotFoundError, version
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.src.config import configure_logging, load_axes_config, settings
+from backend.src.config import (
+    configure_logging,
+    load_app_config,
+    load_axes_config,
+    settings,
+)
 from backend.src.embedder import Embedder
 from backend.src.normalizer import Normalizer
 from backend.src.rag import RAGPipeline
@@ -38,8 +43,25 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     store = VectorStore(path=settings.chroma_db_path)
     embedder = Embedder()
     normalizer = Normalizer.from_config(load_axes_config())
-    engine = SearchEngine(store, embedder, normalizer)
-    rag = RAGPipeline(engine)
+    app_cfg = load_app_config()
+    pd = app_cfg.retrieval.parent_doc
+    if pd.enabled and not store.has_parents():
+        logger.warning(
+            "parent_doc.enabled=true but parents.json is missing — falling back "
+            "to legacy file-level search. Run scripts/build_index.py --rebuild "
+            "--mode parent_doc to populate it."
+        )
+        parent_doc_enabled = False
+    else:
+        parent_doc_enabled = pd.enabled
+    engine = SearchEngine(
+        store,
+        embedder,
+        normalizer,
+        parent_doc_enabled=parent_doc_enabled,
+        top_k_children=pd.top_k_children,
+    )
+    rag = RAGPipeline(engine, context_max_chars=app_cfg.rag.context_max_chars)
     _state["engine"] = engine
     _state["rag"] = rag
     _state["embedder"] = embedder
