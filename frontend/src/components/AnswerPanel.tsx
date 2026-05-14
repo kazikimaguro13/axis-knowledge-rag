@@ -1,41 +1,44 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { parseCitations } from "@/lib/citations";
+import type { SearchResultPayload } from "@/lib/api";
 
 interface Props {
   text: string;
   citedIds: string[];
+  sources?: SearchResultPayload[];
   isLoading: boolean;
   isDummy: boolean;
   model: string | null;
   error: string | null;
+  onCitationFocus?: (n: number, sourceId: string | null) => void;
 }
 
-const CITATION_RE = /\[(doc_\d+)\]/g;
-
-function renderWithCitations(text: string): React.ReactNode[] {
+function renderWithCitations(
+  text: string,
+  sources: SearchResultPayload[] | undefined,
+  onClick: (n: number) => void,
+): React.ReactNode[] {
   const parts: React.ReactNode[] = [];
-  let lastIndex = 0;
-  let m: RegExpExecArray | null;
   let i = 0;
-  CITATION_RE.lastIndex = 0;
-  while ((m = CITATION_RE.exec(text)) !== null) {
-    if (m.index > lastIndex) {
-      parts.push(text.slice(lastIndex, m.index));
+  for (const seg of parseCitations(text)) {
+    if (seg.kind === "text") {
+      parts.push(<span key={`t-${i++}`}>{seg.text}</span>);
+    } else {
+      const src = sources?.[seg.n - 1];
+      parts.push(
+        <button
+          key={`c-${i++}`}
+          type="button"
+          onClick={() => onClick(seg.n)}
+          title={src ? `${src.title} (${src.id})` : `出典 ${seg.n}`}
+          className="citation-marker mx-0.5 inline-flex items-baseline rounded bg-emerald-100 px-1 align-baseline text-xs font-semibold text-emerald-700 hover:bg-yellow-200 focus:outline-none focus:ring-2 focus:ring-yellow-400"
+        >
+          [{seg.n}]
+        </button>,
+      );
     }
-    parts.push(
-      <a
-        key={`cite-${i++}`}
-        href={`#${m[1]}`}
-        className="mx-0.5 rounded bg-emerald-100 px-1 text-xs font-medium text-emerald-700 no-underline hover:bg-emerald-200"
-      >
-        [{m[1]}]
-      </a>
-    );
-    lastIndex = m.index + m[0].length;
-  }
-  if (lastIndex < text.length) {
-    parts.push(text.slice(lastIndex));
   }
   return parts;
 }
@@ -43,10 +46,12 @@ function renderWithCitations(text: string): React.ReactNode[] {
 export default function AnswerPanel({
   text,
   citedIds,
+  sources,
   isLoading,
   isDummy,
   model,
   error,
+  onCitationFocus,
 }: Props) {
   const [displayed, setDisplayed] = useState("");
   useEffect(() => {
@@ -68,6 +73,15 @@ export default function AnswerPanel({
     }, 25);
     return () => clearInterval(id);
   }, [text]);
+
+  function focusSource(n: number) {
+    const src = sources?.[n - 1];
+    if (src) {
+      const el = document.getElementById(src.id);
+      el?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+    onCitationFocus?.(n, src?.id ?? null);
+  }
 
   if (isLoading) {
     return (
@@ -107,7 +121,7 @@ export default function AnswerPanel({
         </span>
       </div>
       <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-800">
-        {renderWithCitations(displayed)}
+        {renderWithCitations(displayed, sources, focusSource)}
       </p>
     </section>
   );
