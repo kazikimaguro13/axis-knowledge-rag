@@ -10,7 +10,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from backend.src.config import settings
+from backend.src.config import load_app_config, settings
 from backend.src.embedder import Embedder
 from backend.src.search import SearchEngine, SearchResult
 from backend.src.vector_store import VectorStore
@@ -46,6 +46,7 @@ class Answer:
 
 
 def _format_context(results: list[SearchResult]) -> str:
+    """Concise context — the legacy v0.6 format kept for short snippet hits."""
     lines: list[str] = []
     for r in results:
         lines.append(f"### [{r.id}] {r.title}")
@@ -53,6 +54,36 @@ def _format_context(results: list[SearchResult]) -> str:
         lines.append(r.body_snippet)
         lines.append("")
     return "\n".join(lines)
+
+
+def build_context(
+    results: list[SearchResult],
+    *,
+    max_chars: int = 8000,
+) -> str:
+    """Concatenate parent (or doc) bodies with citation headers, capped by chars.
+
+    Uses ``body_full`` when populated (parent-doc mode) — that's the entire
+    H2 section text. Falls back to ``body_snippet`` otherwise, so the legacy
+    file-level path keeps working without changes. The hard ``max_chars``
+    budget protects the LLM context window — blocks beyond the budget are
+    dropped silently rather than truncated mid-sentence.
+    """
+    out: list[str] = []
+    used = 0
+    for i, r in enumerate(results, 1):
+        body = r.body_full or r.body_snippet or ""
+        block = (
+            f"## 出典 {i}: [{r.id}] {r.title}\n"
+            f"(file: {r.path})\n"
+            f"axes: {r.axes}\n\n"
+            f"{body}\n\n"
+        )
+        if used + len(block) > max_chars:
+            break
+        out.append(block)
+        used += len(block)
+    return "".join(out)
 
 
 def _dummy_answer(question: str, results: list[SearchResult]) -> Answer:
@@ -82,10 +113,17 @@ class RAGPipeline:
         *,
         force_dummy: bool = False,
         model: str = DEFAULT_MODEL,
+        context_max_chars: int | None = None,
     ) -> None:
         self._engine = engine
         self._model = model
         self._use_dummy = force_dummy or not settings.anthropic_api_key
+        if context_max_chars is None:
+            try:
+                context_max_chars = load_app_config().rag.context_max_chars
+            except Exception:  # noqa: BLE001
+                context_max_chars = 8000
+        self._context_max_chars = context_max_chars
         if self._use_dummy:
             logger.warning("RAGPipeline running in DUMMY mode (no ANTHROPIC_API_KEY)")
             self._client = None
@@ -110,7 +148,12 @@ class RAGPipeline:
         if self._use_dummy:
             return _dummy_answer(question, results)
 
-        context = _format_context(results)
+        # Prefer build_context() — uses full parent text in parent-doc mode,
+        # falls back to snippets in legacy mode. Same prompt either way.
+        if any(r.body_full for r in results):
+            context = build_context(results, max_chars=self._context_max_chars)
+        else:
+            context = _format_context(results)
         user_msg = (
             f"# 質問\n{question}\n\n"
             f"# 提供された資料 (上位 {len(results)} 件)\n\n{context}\n\n"
