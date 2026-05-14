@@ -50,6 +50,11 @@ class SqliteParentStorage:
     CREATE INDEX IF NOT EXISTS idx_parents_doc_id ON parents(doc_id);
     """
 
+    # SQLite's default SQLITE_LIMIT_VARIABLE_NUMBER is 999 on builds <3.32 and
+    # 32766 on newer builds — but we target the conservative limit so 1000+ doc
+    # corpora work everywhere (spec_042 MID #2).
+    SQLITE_VARIABLE_LIMIT = 999
+
     def __init__(self, db_path: str | Path) -> None:
         self._db_path = Path(db_path) if str(db_path) != ":memory:" else Path(":memory:")
         if str(db_path) != ":memory:":
@@ -68,15 +73,26 @@ class SqliteParentStorage:
         return self._row_to_parent(row) if row else None
 
     def get_many(self, parent_ids: list[str]) -> list[ParentChunk]:
+        """Fetch multiple parents in one or more queries.
+
+        Chunked at ``SQLITE_VARIABLE_LIMIT`` (999) so 1000+ docs don't trip
+        SQLite's bind-variable cap (spec_042 MID #2). Input order is preserved
+        and missing ids are silently dropped — same contract as the original
+        single-query implementation.
+        """
         if not parent_ids:
             return []
-        placeholders = ",".join("?" * len(parent_ids))
-        rows = self._conn.execute(
-            f"SELECT parent_id, doc_id, title, text, metadata_json FROM parents "
-            f"WHERE parent_id IN ({placeholders})",
-            parent_ids,
-        ).fetchall()
-        by_id = {r[0]: r for r in rows}
+        by_id: dict[str, tuple] = {}
+        for i in range(0, len(parent_ids), self.SQLITE_VARIABLE_LIMIT):
+            chunk = parent_ids[i : i + self.SQLITE_VARIABLE_LIMIT]
+            placeholders = ",".join("?" * len(chunk))
+            rows = self._conn.execute(
+                f"SELECT parent_id, doc_id, title, text, metadata_json FROM parents "
+                f"WHERE parent_id IN ({placeholders})",
+                chunk,
+            ).fetchall()
+            for r in rows:
+                by_id[r[0]] = r
         return [self._row_to_parent(by_id[pid]) for pid in parent_ids if pid in by_id]
 
     def upsert_many(self, parents: list[ParentChunk]) -> int:
