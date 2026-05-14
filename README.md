@@ -23,6 +23,7 @@ YAML frontmatter 付き Markdown ナレッジに対する、**軸メタデータ
 
 - 🎯 **軸メタデータ + ベクトル検索の hybrid** — `category` / `topic` / `level` などの構造化軸で絞り込みつつ、自然文クエリで意味検索
 - 🧩 **Parent Document Retrieval (Small-to-Big)** — 検索は H2 配下の小チャンク粒度、回答は H2 セクション全文を LLM に渡すので精度と文脈を両立 (v0.7, [ADR-017](docs/adr/ADR-017-parent-document-retrieval.md))
+- 🕐 **Time-Weighted Decay** (opt-in) — frontmatter の `updated` 日付を元に指数減衰係数を掛け、新しい文書を僅かに優遇。`config.yml` で `enabled: true` にすると有効 (v0.7, [ADR-021](docs/adr/ADR-021-time-weighted-decay.md))
 - 🇯🇵 **日本語ナレッジ特化** — 表記ゆれ吸収 (NFKC + カナ統一 + lowercase) 標準搭載
 - 🔌 **LangChain / LlamaIndex 不使用、自前実装** — 依存が薄く、内部挙動が読める。Embedder / VectorStore / RAG Pipeline を必要最小限の薄いラッパで構成
 - 🏠 **Local-first 設計** — ChromaDB はローカル永続、API キー未設定でも DUMMY モードで動作確認可能。個人ナレッジを外部送信しない
@@ -207,6 +208,27 @@ updated: 2026-05-12
 ```
 
 軸の種類 (`enum` / `string` / `integer`) と必須・任意は `config.yml` の `axes:` セクションで定義する。
+
+---
+
+## ⚙️ config.yml 主要設定
+
+| セクション | キー | 既定値 | 説明 |
+|---|---|---|---|
+| `retrieval.parent_doc` | `enabled` | `true` | Small-to-Big 検索の有効化 |
+| `retrieval.time_decay` | `enabled` | `false` | 時間減衰係数 (opt-in) |
+| `retrieval.time_decay` | `half_life_days` | `180` | この日数で decay=0.5 |
+| `retrieval.time_decay` | `weight` | `0.15` | スコアに対する decay の影響割合 |
+| `retrieval.time_decay` | `date_field` | `"updated"` | frontmatter から参照する日付フィールド名 |
+| `rag` | `context_max_chars` | `8000` | RAG コンテキストの最大文字数 |
+
+Time-Weighted Decay を有効にするには:
+
+```yaml
+retrieval:
+  time_decay:
+    enabled: true   # この行を変更するだけ
+```
 
 ---
 
