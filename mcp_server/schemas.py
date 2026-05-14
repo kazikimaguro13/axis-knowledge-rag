@@ -123,6 +123,32 @@ class ChatInput(_BaseInput):
     response_format: ResponseFormat = Field(default=ResponseFormat.MARKDOWN)
 
 
+class NeighborsInput(_BaseInput):
+    doc_id: str = Field(
+        ...,
+        description="Document id (e.g. 'doc_001') whose graph neighbours to return.",
+        min_length=1,
+        max_length=128,
+    )
+    hop: int = Field(
+        default=1,
+        ge=1,
+        le=3,
+        description="BFS depth — 1 returns direct refs neighbours.",
+    )
+    max_neighbors: int = Field(
+        default=20,
+        ge=1,
+        le=100,
+        description="Cap on the number of neighbours returned.",
+    )
+    direction: str = Field(
+        default="both",
+        description="'out' (this doc's refs), 'in' (docs that reference this), or 'both'.",
+    )
+    response_format: ResponseFormat = Field(default=ResponseFormat.MARKDOWN)
+
+
 class IngestInput(_BaseInput):
     raw_text: str = Field(
         ...,
