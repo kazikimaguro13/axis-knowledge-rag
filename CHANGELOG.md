@@ -2,6 +2,31 @@
 
 ## [Unreleased]
 
+### Day 31 (2026-05-14) — Parent Document Retrieval (Small-to-Big) (spec_031)
+
+- backend/src/chunker.py: 新規。Markdown 本文を ParentChunk (H2 単位 / H2 が無ければ doc 全体) と ChildChunk (~256 token; H3+/段落/文末で分割) に純粋関数で分割。LangChain 不使用、`re` + `unicodedata` のみ
+  - `ParentChunk` / `ChildChunk` は frozen dataclass。parent_id 形式は `{doc_id}#{ascii-slug}`、CJK タイトルは `md5[:8]` フォールバックで Chroma metadata key に乗せる
+  - 文字数 token 換算は 2 文字 ≈ 1 token (JP 平均)、長文 paragraph は文末 (`。`/`.`/`!`/`?`) 境界で greedy 分割
+- backend/src/vector_store.py: `add_chunks(parents, children, embeddings)` / `query_children()` / `query_with_parents()` / `load_parents()` / `has_parents()` を追加。child を Chroma collection に upsert (parent_id を metadata に持つ)、parent は ChromaDB ディレクトリ直下の `parents.json` sidecar に永続化。`reset()` は sidecar も削除
+- backend/src/search.py: `SearchEngine` に `parent_doc_enabled: bool = False` (後方互換 default OFF) と `top_k_children` を追加。`_search_parent_doc()` で child 検索 → parent_id dedup → max(parent_score) を採用。BM25 fusion は `parent.path` (= file 単位 doc_id) でスコア合算後、同 doc 内に複数 parent がある場合は最高スコアの 1 つに collapse。SearchResult に `body_full: str = ""` フィールドを追加 (parent 全文; 旧経路では空)
+- backend/src/rag.py: `build_context(results, max_chars=8000)` 新設。`body_full` が populated なら parent 全文を出典ヘッダ付きで連結 (上限超過時は **直前で打ち切り**、文中切断しない)、未 populated なら snippet にフォールバック。`RAGPipeline` の `answer()` は body_full の有無で `build_context()` / `_format_context()` を自動切替
+- backend/src/config.py: `ParentDocConfig` / `RetrievalConfig` / `RAGConfig` / `AppConfig` を追加し、`load_app_config()` で `config.yml > retrieval.parent_doc.{enabled, chunk_strategy, max_child_tokens, top_k_children, top_n_parents}` と `rag.context_max_chars` を typed dataclass に読み込む。`load_axes_config()` は維持 (後方互換)
+- config.yml: `retrieval.parent_doc.*` (default `enabled: true`, `max_child_tokens: 256`, `top_k_children: 20`, `top_n_parents: 5`) と `rag.context_max_chars: 8000` を追加
+- scripts/build_index.py: `--mode {auto,legacy,parent_doc}` フラグを追加 (`auto` は config.yml に従う)、`--rebuild` を `--reset` のエイリアスとして受理。parent_doc モードでは chunker を呼んで `add_chunks()` で indexing、`parents.json` の出力サイズを stdout に表示
+- backend/src/api.py / mcp_server/server.py: lifespan / `_get_engine()` で `load_app_config()` を読み、`parent_doc.enabled=true` でも `parents.json` 不在時は警告ログを出して legacy に **graceful fallback** (UI が真っ白にならない fail-open 方針)。RAGPipeline には `context_max_chars` を伝搬
+- backend/src/search.py の CLI も `parents.json` の存在で parent_doc を自動 ON
+- docs/adr/ADR-017-parent-document-retrieval.md: 新規 ADR (Context / Decision / 4 alternatives / Consequences / Future work)
+- docs/design-decisions.md: ADR-017 セクション追加 (16 → 17 件)
+- docs/INDEX.md: ADR 件数 16 → 17、ADR-017 への直接リンク追加
+- docs/architecture.md: §3-1 Index time に parent_doc / legacy 両モードを記載、§3-1-bis 「Parent Document Retrieval の構造」を追加 (chunker 構造 ASCII 図と検索フロー)、§4 コンポーネント表に chunker.py 行を追加し vector_store/search/rag の備考を更新
+- docs/mcp-server.md: `axis_search` の Annotations 直下に「v0.7 以降は同じ file から複数 H2 が hit し得る」旨の注記を追加 (Pydantic スキーマは不変、既存クライアント互換)
+- README.md: ✨ 特徴 に「🧩 Parent Document Retrieval (Small-to-Big)」行を追加、ADR-017 へリンク
+- backend/tests/test_chunker.py: 新規 14 件 — H2 なし / H2 分割 / 前文の root parent / token cap / 文末境界 / parent 内に child を内包 / 決定論的 parent_id / orphan child を作らない / 空 body / metadata 継承 / CJK タイトル → md5 slug / heading-only セクション / dataclass frozen / DEFAULT_MAX_CHILD_TOKENS 定数
+- backend/tests/test_vector_store.py: 新規 5 件 — `add_chunks()` で children 件数が collection に反映 + `parents.json` 生成、`query_with_parents()` の parent dedup と top_n、`load_parents()` で sidecar から復元、length mismatch 時の ValueError、`reset()` で sidecar も削除
+- backend/tests/test_search.py: 新規 4 件 — parent_doc モードで parent_id を返す / parent_id が unique / axis-only path も動作 / `parent_doc_enabled` プロパティ
+- 後方互換: `SearchEngine(store, embedder)` (parent_doc_enabled 未指定) は v0.6 と同一挙動。既存 169 tests は全て緑
+- 設計の意図: child を embed・parent を返す Small-to-Big パターンで「精度 (小チャンク) と文脈 (H2 セクション) の両立」を実現。parent_doc は JSON sidecar なので埋め込みコストは旧方式と同等、parent text の更新は再 embedding 不要
+
 ### Day 30 (2026-05-14) — Public README cleanup + GitHub metadata
 
 - README: 「デモ GIF 取得チェックリスト」セクション削除 (内部 TODO 表記、外部公開不適切)
