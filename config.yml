@@ -53,8 +53,8 @@ rag:
   context_max_chars: 8000
 
 # spec_032: Conversational RAG (chat with history).
-# In-memory only (single uvicorn worker required). Redis / DB persistence
-# is a v0.8 candidate (spec_037).
+# spec_036 added pluggable storage backends (memory / sqlite / redis).
+# Default is sqlite → sessions survive restarts and uvicorn worker rotation.
 chat:
   enabled: true
   max_history_turns: 6        # 6 turn = 12 messages kept in store
@@ -63,6 +63,14 @@ chat:
   rewriter:
     enabled: true             # false → skip rewrite, use original query
     model: "gemini-1.5-flash"
+  # spec_036: storage backend selection.
+  # - backend: "sqlite" (default) — file-backed, survives restarts
+  # - backend: "memory"          — v0.7 in-memory; lost on restart
+  # - backend: "redis"           — requires `pip install -e ".[redis]"`
+  storage:
+    backend: "sqlite"
+    sqlite_path: "~/.axis_chat.db"           # only used when backend=sqlite
+    redis_url: "redis://localhost:6379/0"    # only used when backend=redis
 
 # spec_040: GraphRAG + 3D Knowledge Graph (v0.8 marquee feature).
 # Builds a directed graph from frontmatter `refs:` at startup. Used for:

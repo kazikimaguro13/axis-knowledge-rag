@@ -17,6 +17,7 @@ from backend.src.config import (
 from backend.src.conversation import (
     ConversationStore,
     configure_default_store,
+    make_conversation_store,
 )
 from backend.src.embedder import Embedder
 from backend.src.graph import KnowledgeGraph, build_default_graph
@@ -85,11 +86,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         graph=graph,
     )
     rag = RAGPipeline(engine, context_max_chars=app_cfg.rag.context_max_chars)
-    chat_store = ConversationStore(
-        max_sessions=app_cfg.chat.max_sessions,
-        ttl_seconds=app_cfg.chat.ttl_seconds,
-    )
+    chat_store = make_conversation_store(app_cfg.chat)
     configure_default_store(chat_store)
+    logger.info(
+        "chat store: %s (backend=%s)",
+        type(chat_store).__name__,
+        app_cfg.chat.storage.backend,
+    )
     _state["engine"] = engine
     _state["rag"] = rag
     _state["embedder"] = embedder
@@ -98,8 +101,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     _state["chat_cfg"] = app_cfg.chat
     _state["graph"] = graph
     _state["graph_cfg"] = app_cfg.graph
-    yield
-    _state.clear()
+    try:
+        yield
+    finally:
+        try:
+            chat_store.close()
+        except Exception:  # noqa: BLE001
+            logger.warning("chat store close failed", exc_info=True)
+        _state.clear()
 
 
 def _pkg_version() -> str:
@@ -244,7 +253,7 @@ async def get_chat_history(session_id: str) -> ChatHistoryResponse:
     store: ConversationStore = _state["chat_store"]
     # We deliberately treat "unknown id" as 404 — auto-creating on GET would
     # confuse clients that use it to probe whether a session is still alive.
-    if session_id not in store._sessions:  # noqa: SLF001
+    if not _store_has(store, session_id):
         raise HTTPException(status_code=404, detail="session not found")
     session = store.get_or_create(session_id)
     return ChatHistoryResponse(
@@ -259,6 +268,20 @@ async def get_chat_history(session_id: str) -> ChatHistoryResponse:
             for m in session.messages
         ],
     )
+
+
+def _store_has(store: ConversationStore, session_id: str) -> bool:
+    """Existence check that works across all backends.
+
+    All three implementations expose a ``has()`` method; Protocol doesn't
+    require it so we duck-type. Falls back to ``get_history``-truthy as a
+    last resort, which is fine because the only callers (404 probes) tolerate
+    a slight performance hit on unknown sessions.
+    """
+    has = getattr(store, "has", None)
+    if callable(has):
+        return bool(has(session_id))
+    return bool(store.get_history(session_id, last_n_turns=1))
 
 
 @app.delete("/api/chat/{session_id}", status_code=204)

@@ -104,6 +104,25 @@ class ChatRewriterConfig:
     model: str = "gemini-1.5-flash"
 
 
+# ---------------------------------------------------------------------------
+# spec_036: chat session storage backend selection
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class StorageConfig:
+    """Backend selection for ``ConversationStore`` (spec_036).
+
+    - ``backend="sqlite"`` (default): file-backed, survives restarts.
+    - ``backend="memory"``: v0.7 in-memory dict; lost on restart, OK for tests.
+    - ``backend="redis"``: requires ``pip install -e ".[redis]"``.
+    """
+
+    backend: str = "sqlite"  # "memory" | "sqlite" | "redis"
+    sqlite_path: str = "~/.axis_chat.db"
+    redis_url: str = "redis://localhost:6379/0"
+
+
 @dataclass(frozen=True)
 class ChatConfig:
     """Settings for the conversational ``/api/chat`` path."""
@@ -113,6 +132,7 @@ class ChatConfig:
     ttl_seconds: int = 86400     # 24h since last access → evicted
     max_sessions: int = 100      # LRU cap
     rewriter: ChatRewriterConfig = field(default_factory=ChatRewriterConfig)
+    storage: StorageConfig = field(default_factory=StorageConfig)
 
 
 # ---------------------------------------------------------------------------
@@ -170,6 +190,7 @@ def load_app_config(path: Path | None = None) -> AppConfig:
     rag_raw = (raw.get("rag") or {}) if isinstance(raw, dict) else {}
     chat_raw = (raw.get("chat") or {}) if isinstance(raw, dict) else {}
     rew_raw = (chat_raw.get("rewriter") or {}) if isinstance(chat_raw, dict) else {}
+    store_raw = (chat_raw.get("storage") or {}) if isinstance(chat_raw, dict) else {}
     graph_raw = (raw.get("graph") or {}) if isinstance(raw, dict) else {}
 
     pd = ParentDocConfig(
@@ -192,6 +213,11 @@ def load_app_config(path: Path | None = None) -> AppConfig:
         enabled=bool(rew_raw.get("enabled", ChatRewriterConfig.enabled)),
         model=str(rew_raw.get("model", ChatRewriterConfig.model)),
     )
+    storage = StorageConfig(
+        backend=str(store_raw.get("backend", StorageConfig.backend)),
+        sqlite_path=str(store_raw.get("sqlite_path", StorageConfig.sqlite_path)),
+        redis_url=str(store_raw.get("redis_url", StorageConfig.redis_url)),
+    )
     chat = ChatConfig(
         enabled=bool(chat_raw.get("enabled", ChatConfig.enabled)),
         max_history_turns=int(
@@ -200,6 +226,7 @@ def load_app_config(path: Path | None = None) -> AppConfig:
         ttl_seconds=int(chat_raw.get("ttl_seconds", ChatConfig.ttl_seconds)),
         max_sessions=int(chat_raw.get("max_sessions", ChatConfig.max_sessions)),
         rewriter=rewriter,
+        storage=storage,
     )
     graph = GraphConfig(
         enabled=bool(graph_raw.get("enabled", GraphConfig.enabled)),

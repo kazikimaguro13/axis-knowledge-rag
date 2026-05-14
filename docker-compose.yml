@@ -29,5 +29,21 @@ services:
       backend:
         condition: service_healthy
 
+  # spec_036: optional Redis backend for ConversationStore. Off by default;
+  # activate with `docker compose --profile redis-backend up redis`, then set
+  # config.yml > chat.storage.backend: "redis" and install [redis] extras.
+  redis:
+    image: redis:7-alpine
+    profiles: ["redis-backend"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: >-
+      redis-server
+      --appendonly yes
+      --maxmemory-policy allkeys-lru
+
 volumes:
   chroma-data:
+  redis-data:

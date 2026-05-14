@@ -45,6 +45,9 @@ eval = [
     "langchain-google-genai>=2.0",
     "langchain-core>=0.3",
 ]
+redis = [
+    "redis>=5.0,<6",
+]
 
 [project.scripts]
 axis-knowledge-rag-mcp = "mcp_server.server:main"

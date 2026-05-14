@@ -139,9 +139,9 @@ def test_build_context_falls_back_to_snippet_when_no_body_full() -> None:
 
 
 def test_chat_creates_session_and_persists_turn(rag_pipeline: RAGPipeline) -> None:
-    from backend.src.conversation import ConversationStore
+    from backend.src.conversation import MemoryStore
 
-    store = ConversationStore()
+    store = MemoryStore()
     resp = rag_pipeline.chat("dummy question", store=store)
     assert resp.session_id
     assert resp.is_dummy is True
@@ -153,9 +153,9 @@ def test_chat_creates_session_and_persists_turn(rag_pipeline: RAGPipeline) -> No
 
 
 def test_chat_reuses_session(rag_pipeline: RAGPipeline) -> None:
-    from backend.src.conversation import ConversationStore
+    from backend.src.conversation import MemoryStore
 
-    store = ConversationStore()
+    store = MemoryStore()
     r1 = rag_pipeline.chat("first", store=store)
     r2 = rag_pipeline.chat("second", session_id=r1.session_id, store=store)
     assert r2.session_id == r1.session_id
@@ -164,9 +164,9 @@ def test_chat_reuses_session(rag_pipeline: RAGPipeline) -> None:
 
 
 def test_chat_no_rewrite_when_history_empty(rag_pipeline: RAGPipeline) -> None:
-    from backend.src.conversation import ConversationStore
+    from backend.src.conversation import MemoryStore
 
-    store = ConversationStore()
+    store = MemoryStore()
     resp = rag_pipeline.chat("first turn", store=store)
     # No prior turns → rewriter returns original → rewritten_question=None
     assert resp.rewritten_question is None
