@@ -1,5 +1,6 @@
 """Integration tests for SearchEngine."""
 
+from datetime import UTC
 from pathlib import Path
 
 import pytest
@@ -303,3 +304,115 @@ def test_parent_doc_with_bm25_fusion_collapses_per_doc(
     paths = [r.path for r in results]
     # Each file should appear at most once after collapse
     assert len(paths) == len(set(paths))
+
+
+# ---------------------------------------------------------------------------
+# spec_035: Time-weighted decay
+# ---------------------------------------------------------------------------
+
+
+def test_time_decay_reorders_by_recency() -> None:
+    """_apply_time_decay demotes older docs relative to newer ones (same base score)."""
+    from datetime import datetime, timedelta
+
+    from backend.src.config import TimeDecayConfig
+    from backend.src.search import SearchResult, _apply_time_decay
+
+    now = datetime(2026, 5, 14, tzinfo=UTC)
+    old_date = (now - timedelta(days=360)).isoformat()
+    new_date = (now - timedelta(days=10)).isoformat()
+
+    old_doc = SearchResult(
+        id="old", title="Old", score=0.8, axes={}, body_snippet="",
+        path="old.md", metadata={"updated": old_date},
+    )
+    new_doc = SearchResult(
+        id="new", title="New", score=0.8, axes={}, body_snippet="",
+        path="new.md", metadata={"updated": new_date},
+    )
+    td = TimeDecayConfig(enabled=True, half_life_days=180, weight=0.3, date_field="updated")
+    results = _apply_time_decay([old_doc, new_doc], td)
+
+    new_result = next(r for r in results if r.id == "new")
+    old_result = next(r for r in results if r.id == "old")
+    assert new_result.score > old_result.score
+
+
+def test_time_decay_no_metadata_no_penalty() -> None:
+    """Docs without the date field receive decay=1.0 (score unchanged)."""
+    from backend.src.config import TimeDecayConfig
+    from backend.src.search import SearchResult, _apply_time_decay
+
+    doc = SearchResult(
+        id="nodates", title="No dates", score=0.75, axes={}, body_snippet="",
+        path="nodates.md", metadata={},
+    )
+    td = TimeDecayConfig(enabled=True, half_life_days=180, weight=0.5, date_field="updated")
+    results = _apply_time_decay([doc], td)
+    assert results[0].score == pytest.approx(0.75)
+
+
+def test_time_decay_engine_no_config_unchanged_scores(
+    in_memory_store: VectorStore, dummy_embedder: Embedder
+) -> None:
+    """Engine with time_decay_config=None (default) must leave scores unchanged."""
+    from backend.src.config import TimeDecayConfig
+
+    docs = [
+        _make_doc("d1", "技術記事", "rag knowledge retrieval system"),
+        _make_doc("d2", "技術記事", "vector search cosine similarity"),
+    ]
+    embeddings = dummy_embedder.embed_batch([d.body for d in docs])
+    in_memory_store.upsert_many(docs, embeddings)
+
+    engine_no_decay = SearchEngine(in_memory_store, dummy_embedder)
+    td_cfg = TimeDecayConfig(enabled=True, half_life_days=180, weight=0.5, date_field="updated")
+    engine_with_decay = SearchEngine(
+        in_memory_store, dummy_embedder, time_decay_config=td_cfg
+    )
+
+    r_no = engine_no_decay.search("rag", top_k=2)
+    r_with = engine_with_decay.search("rag", top_k=2)
+    # No updated field in metadata → decay=1.0 → blend returns base unchanged
+    for r1, r2 in zip(r_no, r_with, strict=True):
+        assert r1.score == pytest.approx(r2.score)
+
+
+def test_time_decay_disabled_flag_is_noop(
+    in_memory_store: VectorStore, dummy_embedder: Embedder
+) -> None:
+    """enabled=False must produce identical results to no time_decay_config."""
+    from backend.src.config import TimeDecayConfig
+
+    docs = [
+        _make_doc("d1", "技術記事", "rag retrieval pipeline"),
+        _make_doc("d2", "技術記事", "bm25 keyword matching"),
+    ]
+    embeddings = dummy_embedder.embed_batch([d.body for d in docs])
+    in_memory_store.upsert_many(docs, embeddings)
+
+    engine_none = SearchEngine(in_memory_store, dummy_embedder)
+    td_disabled = TimeDecayConfig(enabled=False, half_life_days=180, weight=0.5, date_field="updated")
+    engine_disabled = SearchEngine(
+        in_memory_store, dummy_embedder, time_decay_config=td_disabled
+    )
+
+    r_none = engine_none.search("rag", top_k=2)
+    r_disabled = engine_disabled.search("rag", top_k=2)
+    assert [r.id for r in r_none] == [r.id for r in r_disabled]
+    for r1, r2 in zip(r_none, r_disabled, strict=True):
+        assert r1.score == pytest.approx(r2.score)
+
+
+def test_time_decay_result_metadata_field_present(
+    in_memory_store: VectorStore, dummy_embedder: Embedder
+) -> None:
+    """SearchResult must expose a metadata dict (even if empty) for time_decay use."""
+    docs = [_make_doc("d1", "技術記事", "RAGとは検索拡張生成のことです")]
+    embeddings = dummy_embedder.embed_batch([d.body for d in docs])
+    in_memory_store.upsert_many(docs, embeddings)
+
+    engine = SearchEngine(in_memory_store, dummy_embedder)
+    results = engine.search("RAG", top_k=1)
+    assert results
+    assert isinstance(results[0].metadata, dict)

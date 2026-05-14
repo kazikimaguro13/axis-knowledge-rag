@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+### Day 35 (2026-05-14) — Time-Weighted Decay (spec_035)
+
+- backend/src/_decay.py: 新規。`decay_factor()` / `blend_score()` / `_parse_datetime()` の 3 純粋関数。副作用なし・新規依存なし (math.exp のみ)。ISO 8601 文字列・datetime 両対応。パース失敗 / `updated` 不在 / 未来日付はすべて decay=1.0 (ペナルティなし)
+- backend/src/config.py: `TimeDecayConfig` (frozen dataclass) を追加。`enabled=False / half_life_days=180 / weight=0.15 / date_field="updated"` を default 値とし、`RetrievalConfig` に `time_decay` フィールドを追加。`load_app_config()` が `retrieval.time_decay.*` を typed に読み込む
+- config.yml: `retrieval.time_decay.{enabled,half_life_days,weight,date_field}` を追加 (default: `enabled: false`)。既存挙動変更なし
+- backend/src/search.py: `SearchResult` に `metadata: dict[str, Any]` フィールドを追加 (後方互換 default `{}`)。`_to_results()` / `_parent_to_result()` が Chroma / ParentChunk の raw metadata を `SearchResult.metadata` に格納。モジュールレベル `_apply_time_decay()` 関数を追加 (BM25 fusion 後に適用、re-sort + top_k 再スライス)。`SearchEngine.__init__()` に `time_decay_config: TimeDecayConfig | None = None` を追加。`_main()` が config から `time_decay_config` を渡す
+- backend/tests/test_decay.py: 新規 14 件 — None/空/今日/half-life/2×half-life/未来日付/ISOzulu/ISO日付のみ/不正文字列/blend weight=0/1/0.5/clamp-high/clamp-neg/recent>old/≤1 invariant
+- backend/tests/test_search.py: 新規 5 件 — `_apply_time_decay` でのスコア逆転確認 / 日付なし doc でペナルティなし / time_decay_config=None で既存スコア不変 / enabled=False で no-op / SearchResult.metadata フィールド存在確認
+- docs/adr/ADR-021-time-weighted-decay.md: 新規。Context (鮮度考慮) / Decision (exp decay + weight blend) / Alternatives (linear/step/hard-filter を却下) / Consequences (default off・安全側倒れ)
+- README.md: ✨ 特徴 に「🕐 Time-Weighted Decay」行を追加、⚙️ config.yml 主要設定テーブルを新設
+- 後方互換: `enabled: false` default かつ `SearchResult.metadata` は `field(default_factory=dict)` なので既存 tests / API / RAGAS は全て緑
+
 ### Day 33 (2026-05-14) — RAGAS CI/CD (LLM-as-a-Judge 自動評価) (spec_033)
 
 - evaluation/__init__.py: 新規。evaluation パッケージ初期化

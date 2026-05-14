@@ -63,9 +63,29 @@ class ParentDocConfig:
     top_n_parents: int = 5
 
 
+# ---------------------------------------------------------------------------
+# spec_035: time-weighted decay settings
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class TimeDecayConfig:
+    """Settings for recency-boost via exponential half-life decay.
+
+    default: enabled=False (opt-in). When enabled, newer docs get a slight
+    score boost without fully overriding relevance ranking.
+    """
+
+    enabled: bool = False
+    half_life_days: float = 180.0
+    weight: float = 0.15
+    date_field: str = "updated"  # frontmatter field name; "created" also works
+
+
 @dataclass(frozen=True)
 class RetrievalConfig:
     parent_doc: ParentDocConfig = field(default_factory=ParentDocConfig)
+    time_decay: TimeDecayConfig = field(default_factory=TimeDecayConfig)
 
 
 @dataclass(frozen=True)
@@ -100,6 +120,7 @@ def load_app_config(path: Path | None = None) -> AppConfig:
 
     retr_raw = (raw.get("retrieval") or {}) if isinstance(raw, dict) else {}
     pd_raw = (retr_raw.get("parent_doc") or {}) if isinstance(retr_raw, dict) else {}
+    td_raw = (retr_raw.get("time_decay") or {}) if isinstance(retr_raw, dict) else {}
     rag_raw = (raw.get("rag") or {}) if isinstance(raw, dict) else {}
 
     pd = ParentDocConfig(
@@ -109,7 +130,13 @@ def load_app_config(path: Path | None = None) -> AppConfig:
         top_k_children=int(pd_raw.get("top_k_children", ParentDocConfig.top_k_children)),
         top_n_parents=int(pd_raw.get("top_n_parents", ParentDocConfig.top_n_parents)),
     )
+    td = TimeDecayConfig(
+        enabled=bool(td_raw.get("enabled", TimeDecayConfig.enabled)),
+        half_life_days=float(td_raw.get("half_life_days", TimeDecayConfig.half_life_days)),
+        weight=float(td_raw.get("weight", TimeDecayConfig.weight)),
+        date_field=str(td_raw.get("date_field", TimeDecayConfig.date_field)),
+    )
     rag = RAGConfig(
         context_max_chars=int(rag_raw.get("context_max_chars", RAGConfig.context_max_chars)),
     )
-    return AppConfig(retrieval=RetrievalConfig(parent_doc=pd), rag=rag)
+    return AppConfig(retrieval=RetrievalConfig(parent_doc=pd, time_decay=td), rag=rag)

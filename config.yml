@@ -39,5 +39,15 @@ retrieval:
     top_k_children: 20
     top_n_parents: 5
 
+  # spec_035: Time-Weighted Decay (recency boost, opt-in).
+  # Multiplies final score by exp(-ln(2) * age_days / half_life_days) * weight.
+  # Set enabled: true to activate; default off so existing behaviour is unchanged.
+  # date_field: frontmatter key to read — "updated" matches examples/knowledge/*.md
+  time_decay:
+    enabled: false              # default off (opt-in)
+    half_life_days: 180         # half-year → score * 0.5 at 180 days old
+    weight: 0.15                # up to 15% of score influenced by recency
+    date_field: "updated"       # "created" also works
+
 rag:
   context_max_chars: 8000

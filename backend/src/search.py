@@ -9,14 +9,20 @@ deduplicates by ``parent_id`` and surfaces the H2 parent section as the
 result. BM25 fusion still scores at the document (file) level — for
 multi-parent documents we keep ``max(parent_score)`` so the best-matching
 section dominates.
+
+spec_035 adds optional time-weighted decay: when ``time_decay_config`` is
+provided and enabled, each result's score is adjusted by an exponential
+half-life factor derived from the document's frontmatter date field.
 """
 
 import logging
 from dataclasses import dataclass, field
 from typing import Any
 
+from backend.src._decay import blend_score, decay_factor
 from backend.src.bm25_index import BM25Index
 from backend.src.chunker import ParentChunk
+from backend.src.config import TimeDecayConfig
 from backend.src.embedder import Embedder
 from backend.src.normalizer import Normalizer
 from backend.src.vector_store import VectorStore
@@ -37,6 +43,8 @@ class SearchResult:
     # legacy file-level path (where ``body_snippet`` is already the whole
     # body, just truncated to 200 chars). Populated only by parent-doc mode.
     body_full: str = ""
+    # spec_035: raw doc metadata (frontmatter fields) for time-decay lookup.
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 def _build_where(filters: dict[str, Any]) -> dict[str, Any] | None:
@@ -101,6 +109,35 @@ def _to_results(raw: dict[str, Any]) -> list[SearchResult]:
                 body_snippet=_snippet(documents[i] if documents else ""),
                 path=str(md.get("path", "")),
                 refs=refs,
+                metadata=dict(md),
+            )
+        )
+    return out
+
+
+def _apply_time_decay(
+    results: list[SearchResult], td: TimeDecayConfig
+) -> list[SearchResult]:
+    """Reweight each result's score using exponential half-life decay.
+
+    Docs without the configured date field get decay=1.0 (no penalty).
+    """
+    out = []
+    for r in results:
+        updated = r.metadata.get(td.date_field)
+        d = decay_factor(updated, half_life_days=td.half_life_days)
+        new_score = blend_score(r.score, d, td.weight)
+        out.append(
+            SearchResult(
+                id=r.id,
+                title=r.title,
+                score=new_score,
+                axes=r.axes,
+                body_snippet=r.body_snippet,
+                path=r.path,
+                refs=r.refs,
+                body_full=r.body_full,
+                metadata=r.metadata,
             )
         )
     return out
@@ -116,6 +153,7 @@ class SearchEngine:
         *,
         parent_doc_enabled: bool = False,
         top_k_children: int = 20,
+        time_decay_config: TimeDecayConfig | None = None,
     ) -> None:
         self._store = store
         self._embedder = embedder
@@ -123,6 +161,7 @@ class SearchEngine:
         self._bm25_index = bm25_index
         self._parent_doc_enabled = parent_doc_enabled
         self._top_k_children = top_k_children
+        self._time_decay_config = time_decay_config
         if parent_doc_enabled and not store.parents:
             # Try lazy-load from sidecar so callers can build the engine
             # without remembering the load step.
@@ -208,10 +247,18 @@ class SearchEngine:
                         body_snippet=r.body_snippet,
                         path=r.path,
                         refs=r.refs,
+                        metadata=r.metadata,
                     )
                 )
             fused.sort(key=lambda r: r.score, reverse=True)
             results = fused[:top_k]
+
+        # spec_035: apply time-weighted decay after fusion (re-sort needed).
+        td = self._time_decay_config
+        if td is not None and td.enabled and td.weight > 0:
+            results = _apply_time_decay(results, td)
+            results.sort(key=lambda r: r.score, reverse=True)
+            results = results[:top_k]
 
         logger.info(
             "search(query=%r, filters=%s, bm25_weight=%.2f) -> %d results",
@@ -282,6 +329,7 @@ class SearchEngine:
                         path=r.path,
                         refs=r.refs,
                         body_full=r.body_full,
+                        metadata=r.metadata,
                     )
                 )
             # Collapse multiple parents from the same doc — keep best score.
@@ -291,6 +339,13 @@ class SearchEngine:
                     by_doc[r.path] = r
             results = sorted(by_doc.values(), key=lambda r: r.score, reverse=True)[:top_k]
         else:
+            results = results[:top_k]
+
+        # spec_035: apply time-weighted decay after fusion (re-sort needed).
+        td = self._time_decay_config
+        if td is not None and td.enabled and td.weight > 0:
+            results = _apply_time_decay(results, td)
+            results.sort(key=lambda r: r.score, reverse=True)
             results = results[:top_k]
 
         logger.info(
@@ -317,6 +372,7 @@ class SearchEngine:
             path=parent.doc_id,
             refs=list(refs),
             body_full=parent.text,
+            metadata=dict(meta),
         )
 
 
@@ -372,6 +428,7 @@ def _main(argv: list[str]) -> int:
         normalizer,
         parent_doc_enabled=parent_doc_enabled,
         top_k_children=pd.top_k_children,
+        time_decay_config=app_cfg.retrieval.time_decay,
     )
     results = engine.search(
         args.query,
