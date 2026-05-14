@@ -194,6 +194,9 @@ class SqliteStore:
         session_id TEXT PRIMARY KEY,
         last_access REAL NOT NULL
     );
+    -- spec_042 MID #3: TTL eviction + LRU pick both scan by last_access;
+    -- without this index they become O(N) over the whole sessions table.
+    CREATE INDEX IF NOT EXISTS idx_sessions_last_access ON sessions(last_access);
     CREATE TABLE IF NOT EXISTS messages (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         session_id TEXT NOT NULL,
