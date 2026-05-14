@@ -1,0 +1,9 @@
+[2026-05-14T00:03:11+09:00] dispatch v2 start
+  spec = _ai_workspace/bridge/inbox/spec_029.md
+  result = _ai_workspace/bridge/outbox/result_029.md
+  branch = feat/spec_029-bm25-hybrid (already checked out by parent)
+  claude = /home/nakashima/.npm-global/bin/claude
+2.1.139 (Claude Code)
+  current branch = feat/spec_029-bm25-hybrid
+[2026-05-14T00:03:11+09:00] launching claude...
+[2026-05-14T00:03:22+09:00] claude exited with code 0

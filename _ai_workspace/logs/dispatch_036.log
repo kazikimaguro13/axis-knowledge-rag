@@ -1,0 +1,22 @@
+[2026-05-14T17:36:01+09:00] dispatch v4 start
+  spec     = /home/nakashima/projects/axis-knowledge-rag/_ai_workspace/bridge/inbox/spec_036.md (639 lines)
+  branch   = feat/spec_036-session-persistence
+  claude   = /home/nakashima/.npm-global/bin/claude (2.1.139 (Claude Code))
+  prompt len = 22543 chars
+[2026-05-14T17:36:01+09:00] launching claude...
+spec_036 完了。
+
+## まとめ
+
+**変更**: `ConversationStore` を `typing.Protocol` + 3 backend (`MemoryStore` / `SqliteStore` / `RedisStore`) + factory に再設計。default は SQLite (WAL + FK CASCADE) でプロセス再起動・複数 worker に耐性。
+
+**コミット 4 件** (`feat/spec_036-session-persistence` ブランチに push 済み):
+- `ea31596` feat(conversation,config): pluggable session storage
+- `000096a` feat(api,mcp,deps): wire factory + redis extras + compose profile
+- `3995f80` test: parametrize Memory/SQLite + backend-specific tests
+- `f565176` docs: ADR-022 + deployment + CHANGELOG
+
+**結果**: 317 passed + 1 skipped (redis 未インストール時のみ)、ruff 緑、SQLite 再起動シナリオ smoke 通過。後方非互換 1 件 (`ConversationStore` の class → Protocol 化) は in-repo callers を更新済み、result_036.md の Open questions に明記。
+
+レポート: `_ai_workspace/bridge/outbox/result_036.md`
+[2026-05-14T17:50:47+09:00] claude exited code=0

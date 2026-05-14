@@ -4,14 +4,19 @@ Two modes (spec_031):
     * ``--mode legacy``: file-level embedding (v0.6 behavior).
     * ``--mode parent_doc``: chunk each .md into H2-section parents +
       paragraph-level children, embed the children, and write parents to
-      ``parents.json`` next to the Chroma directory.
+      ``parents.db`` next to the Chroma directory.
     * ``--mode auto`` (default): pick based on ``config.yml`` →
       ``retrieval.parent_doc.enabled``.
+
+Migration (spec_037):
+    * ``--migrate-parents-json``: one-shot, idempotent migration from the
+      legacy ``parents.json`` sidecar to ``parents.db`` (SQLite).
 
 Usage:
     python -m scripts.build_index ./examples/knowledge
     python -m scripts.build_index ./examples/knowledge --reset
     python -m scripts.build_index ./examples/knowledge --rebuild --mode parent_doc
+    python -m scripts.build_index --migrate-parents-json
 """
 
 import argparse
@@ -31,10 +36,41 @@ from backend.src.normalizer import Normalizer
 from backend.src.vector_store import VectorStore
 
 
+def _run_migrate_parents_json(db_path: Path) -> int:
+    """Migrate parents.json → parents.db. Idempotent (no-op if already done)."""
+    sqlite_path = db_path / "parents.db"
+    json_path = db_path / "parents.json"
+
+    if sqlite_path.exists():
+        print(f"already migrated: {sqlite_path} exists — skipping.")
+        return 0
+
+    if not json_path.exists():
+        print(f"no parents.json found at {json_path} — nothing to migrate.")
+        return 0
+
+    from backend.src.parent_storage import JsonParentStorage, SqliteParentStorage
+
+    json_store = JsonParentStorage(json_path)
+    sqlite_store = SqliteParentStorage(sqlite_path)
+    all_parents = json_store.list_all()
+    sqlite_store.upsert_many(all_parents)
+    count = sqlite_store.count()
+    print(f"migrated {count} parents to {sqlite_path}")
+    sqlite_store.close()
+    json_store.close()
+    return 0
+
+
 def main(argv: list[str]) -> int:
     configure_logging()
     parser = argparse.ArgumentParser(description="Build ChromaDB index from Markdown.")
-    parser.add_argument("knowledge_dir", type=Path)
+    parser.add_argument(
+        "knowledge_dir",
+        type=Path,
+        nargs="?",
+        help="Directory of Markdown knowledge files (required unless --migrate-parents-json).",
+    )
     parser.add_argument("--reset", action="store_true", help="Drop existing collection first")
     parser.add_argument(
         "--rebuild",
@@ -53,7 +89,25 @@ def main(argv: list[str]) -> int:
         default="auto",
         help="Indexing mode. 'auto' follows config.yml retrieval.parent_doc.enabled.",
     )
+    parser.add_argument(
+        "--migrate-parents-json",
+        action="store_true",
+        help="One-shot: migrate parents.json to parents.db then exit (idempotent).",
+    )
+    parser.add_argument(
+        "--parent-storage",
+        choices=["sqlite", "json"],
+        default=None,
+        help="Override config.yml retrieval.parent_doc.storage",
+    )
     args = parser.parse_args(argv[1:])
+
+    # --migrate-parents-json: early exit, no knowledge_dir required
+    if args.migrate_parents_json:
+        return _run_migrate_parents_json(args.db_path)
+
+    if args.knowledge_dir is None:
+        parser.error("knowledge_dir is required unless --migrate-parents-json is specified")
 
     import yaml
 
@@ -68,6 +122,9 @@ def main(argv: list[str]) -> int:
         mode = "parent_doc" if app_cfg.retrieval.parent_doc.enabled else "legacy"
     else:
         mode = args.mode
+
+    # storage type: CLI flag > config.yml
+    storage = args.parent_storage or app_cfg.retrieval.parent_doc.storage
 
     normalizer = Normalizer.from_config(load_axes_config())
     docs = load_directory(args.knowledge_dir, normalizer=normalizer)
@@ -85,7 +142,7 @@ def main(argv: list[str]) -> int:
         print("No documents found.", file=sys.stderr)
         return 1
 
-    store = VectorStore(path=args.db_path)
+    store = VectorStore(path=args.db_path, storage=storage)
     if args.reset or args.rebuild:
         store.reset()
 
@@ -123,9 +180,9 @@ def main(argv: list[str]) -> int:
             f"{len(parents_all)} parents / {len(children_all)} children"
         )
         print(f"  → ChromaDB:   {args.db_path}")
-        sidecar = args.db_path / "parents.json"
-        if sidecar.exists():
-            print(f"  → parents.json: {sidecar} ({sidecar.stat().st_size} bytes)")
+        db_file = args.db_path / "parents.db"
+        if db_file.exists():
+            print(f"  → parents.db: {db_file} ({db_file.stat().st_size} bytes)")
     else:
         # body そのものではなく normalize 済みテキストを embed する。
         # 同じ semantic で書き方が異なる文書を近い位置に配置するため。

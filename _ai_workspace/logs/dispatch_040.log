@@ -1,0 +1,30 @@
+[2026-05-14T16:57:28+09:00] dispatch v4 start
+  spec     = /home/nakashima/projects/axis-knowledge-rag/_ai_workspace/bridge/inbox/spec_040.md (885 lines)
+  branch   = feat/spec_040-graphrag-3d
+  claude   = /home/nakashima/.npm-global/bin/claude (2.1.139 (Claude Code))
+  prompt len = 32126 chars
+[2026-05-14T16:57:29+09:00] launching claude...
+spec_040 完了。`feat/spec_040-graphrag-3d` を 5 コミットに分けて origin に push 済み (main には push していない)。
+
+## サマリ
+
+- **`backend/src/graph.py`** — `networkx.DiGraph` をラップした `KnowledgeGraph` を新規。broken refs/self-loops は warn+skip、循環参照は許容。`build_default_graph()` で起動時に `examples/knowledge/` から build (実測 10 nodes / 7 edges / 1 isolated / 3 components)。
+- **`SearchEngine.search(graph_expand=True)`** — 上位 5 件の seed に対して 1 hop 隣接を BFS、score = 元 × 0.7 でマージ。default `false` で完全後方互換。`/api/search` smoke で `top_k=3` が 3 → 6 件に拡張されることを確認。
+- **`GET /api/graph` / `GET /api/graph/{id}/neighbors`** — pagination + axes フィルタ付き JSON。`config.yml graph.enabled=false` なら 503。
+- **MCP `axis_neighbors`** — `direction="out|in|both"` で参照方向選択可。グラフは lazy build singleton。
+- **Next.js `/graph`** — react-force-graph-3d + three + d3-force-3d、SSR disable、サイドパネルで隣接表示、category/level フィルタ。`npm run build` / `tsc` / `next lint` すべて緑。
+- **Streamlit "🕸️ Graph" タブ** — `/api/graph` を fetch して matplotlib + networkx で 2D spring layout。
+
+## 検証結果
+
+| 項目 | 結果 |
+|---|---|
+| pytest 全体 | **291 passed** (261 + 21 graph + 5 search + 4 API) |
+| ruff | All checks passed |
+| frontend build | 8/8 static, `/graph` 3.83 kB |
+| tsc --noEmit | clean |
+| next lint | No warnings |
+| `/api/search graph_expand=true` smoke | 3 件 → **6 件** に拡張 (doc_004/doc_006/doc_001 が neighbour として merge) |
+
+result_040.md は `_ai_workspace/bridge/outbox/result_040.md` に出力済み。
+[2026-05-14T17:21:43+09:00] claude exited code=0

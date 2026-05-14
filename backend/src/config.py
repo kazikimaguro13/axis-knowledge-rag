@@ -61,6 +61,7 @@ class ParentDocConfig:
     max_child_tokens: int = 256
     top_k_children: int = 20
     top_n_parents: int = 5
+    storage: str = "sqlite"  # spec_037: "sqlite" (default) | "json" (legacy v0.7)
 
 
 # ---------------------------------------------------------------------------
@@ -199,6 +200,7 @@ def load_app_config(path: Path | None = None) -> AppConfig:
         max_child_tokens=int(pd_raw.get("max_child_tokens", ParentDocConfig.max_child_tokens)),
         top_k_children=int(pd_raw.get("top_k_children", ParentDocConfig.top_k_children)),
         top_n_parents=int(pd_raw.get("top_n_parents", ParentDocConfig.top_n_parents)),
+        storage=str(pd_raw.get("storage", ParentDocConfig.storage)),
     )
     td = TimeDecayConfig(
         enabled=bool(td_raw.get("enabled", TimeDecayConfig.enabled)),
