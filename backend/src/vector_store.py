@@ -6,12 +6,16 @@ similarity.
 
 spec_031 adds the parent-document path: ``add_chunks()`` embeds *child*
 sub-blocks into the same Chroma collection while persisting the *parents*
-to a JSON sidecar (``parents.json``) — search-time lookups deduplicate
+to a SQLite sidecar (``parents.db``) — search-time lookups deduplicate
 hits by ``parent_id`` and surface the parent text.
+
+spec_037 migrates parent storage from ``parents.json`` (eager full-load)
+to ``parents.db`` (SQLite, lazy SELECT per parent_id).  A ``parents.json``
+sidecar found on first open is automatically migrated (one-time, warning
+logged).  Use ``storage="json"`` to fall back to the v0.7 behaviour.
 """
 
 import contextlib
-import json
 import logging
 from pathlib import Path
 from typing import Any
@@ -22,11 +26,13 @@ from chromadb.config import Settings as ChromaSettings
 from backend.src.chunker import ChildChunk, ParentChunk
 from backend.src.config import COLLECTION_NAME
 from backend.src.loader import Document
+from backend.src.parent_storage import (
+    ParentStorage,
+    SqliteParentStorage,
+    make_parent_storage,
+)
 
 logger = logging.getLogger(__name__)
-
-PARENTS_SIDECAR_FILENAME = "parents.json"
-PARENTS_SIDECAR_VERSION = 1
 
 
 def _flatten_axes(axes: dict[str, Any]) -> dict[str, str | int | float | bool]:
@@ -58,10 +64,17 @@ def _flatten_axes_with_norm(
 class VectorStore:
     """ChromaDB-backed store for Document embeddings + axis metadata."""
 
-    def __init__(self, path: Path | None = None, *, in_memory: bool = False) -> None:
+    def __init__(
+        self,
+        path: Path | None = None,
+        *,
+        in_memory: bool = False,
+        storage: str = "sqlite",
+    ) -> None:
         if in_memory:
             self._client = chromadb.EphemeralClient()
-            self._sidecar_path: Path | None = None
+            self._chroma_dir: Path | None = None
+            self._parent_storage: ParentStorage = SqliteParentStorage(":memory:")
         else:
             db_path = path or Path("./.chromadb")
             db_path.mkdir(parents=True, exist_ok=True)
@@ -69,9 +82,10 @@ class VectorStore:
                 path=str(db_path),
                 settings=ChromaSettings(anonymized_telemetry=False),
             )
-            self._sidecar_path = db_path / PARENTS_SIDECAR_FILENAME
+            self._chroma_dir = db_path
+            self._parent_storage = make_parent_storage(db_path, storage=storage)
         self._collection = self._client.get_or_create_collection(name=COLLECTION_NAME)
-        # parent_id -> ParentChunk; populated by add_chunks() or load_parents().
+        # in-memory cache; populated by add_chunks() or load_parents()
         self._parents: dict[str, ParentChunk] = {}
 
     def upsert(self, doc: Document, embedding: list[float]) -> None:
@@ -155,12 +169,10 @@ class VectorStore:
             self._client.delete_collection(name=COLLECTION_NAME)
         self._collection = self._client.get_or_create_collection(name=COLLECTION_NAME)
         self._parents = {}
-        if self._sidecar_path is not None and self._sidecar_path.exists():
-            with contextlib.suppress(OSError):
-                self._sidecar_path.unlink()
+        self._parent_storage.clear()
 
     # -----------------------------------------------------------------
-    # spec_031: parent-document retrieval
+    # spec_031 / spec_037: parent-document retrieval
     # -----------------------------------------------------------------
 
     def add_chunks(
@@ -176,14 +188,14 @@ class VectorStore:
         by their ``child_id``. ``parent_id`` is written into each child's
         metadata so search can deduplicate and look up the parent text.
 
-        Parents are kept in memory and mirrored to ``parents.json`` next
-        to the Chroma directory — embeddings are not needed for them.
+        Parents are persisted via ``_parent_storage`` (SQLite by default)
+        and also cached in-memory.
         """
         if len(children) != len(child_embeddings):
             raise ValueError("children and embeddings length mismatch")
 
         self._parents = {p.parent_id: p for p in parents}
-        self._persist_parents()
+        self._parent_storage.upsert_many(parents)
 
         if not children:
             return
@@ -258,9 +270,12 @@ class VectorStore:
                 best[pid] = score
 
         ranked = sorted(best.items(), key=lambda kv: kv[1], reverse=True)
+        top_pids = [pid for pid, _ in ranked]
+        fetched = {p.parent_id: p for p in self._parent_storage.get_many(top_pids)}
+
         out: list[tuple[ParentChunk, float]] = []
         for pid, score in ranked:
-            parent = self._parents.get(pid)
+            parent = fetched.get(pid)
             if parent is None:
                 logger.warning("parent_id %s referenced by a child has no entry in parents", pid)
                 continue
@@ -270,25 +285,17 @@ class VectorStore:
         return out
 
     def load_parents(self) -> int:
-        """Load ``parents.json`` (if any). Returns the count loaded."""
-        if self._sidecar_path is None or not self._sidecar_path.exists():
+        """Populate the in-memory parents cache from storage. Returns count loaded.
+
+        For SQLite storage this issues a SELECT * to fill the cache, keeping
+        backward-compat with callers that access ``self.parents`` after this
+        call.  In-memory stores start fresh and have nothing to load.
+        """
+        if self._chroma_dir is None:
             return 0
-        try:
-            payload = json.loads(self._sidecar_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as e:
-            logger.warning("parents.json is unreadable (%s) — ignoring", e)
-            return 0
-        entries = (payload or {}).get("parents", {}) or {}
-        self._parents = {
-            pid: ParentChunk(
-                parent_id=pid,
-                doc_id=str(entry.get("doc_id", "")),
-                title=str(entry.get("title", "")),
-                text=str(entry.get("text", "")),
-                metadata=dict(entry.get("metadata") or {}),
-            )
-            for pid, entry in entries.items()
-        }
+        if hasattr(self._parent_storage, "list_all"):
+            parents = self._parent_storage.list_all()  # type: ignore[attr-defined]
+            self._parents = {p.parent_id: p for p in parents}
         return len(self._parents)
 
     @property
@@ -296,28 +303,5 @@ class VectorStore:
         return self._parents
 
     def has_parents(self) -> bool:
-        """True if the in-memory parents dict OR the sidecar file is populated."""
-        if self._parents:
-            return True
-        return self._sidecar_path is not None and self._sidecar_path.exists()
-
-    def _persist_parents(self) -> None:
-        if self._sidecar_path is None:
-            return  # in-memory store — nothing to write
-        payload = {
-            "version": PARENTS_SIDECAR_VERSION,
-            "parents": {
-                pid: {
-                    "doc_id": p.doc_id,
-                    "title": p.title,
-                    "text": p.text,
-                    "metadata": p.metadata,
-                }
-                for pid, p in self._parents.items()
-            },
-        }
-        self._sidecar_path.parent.mkdir(parents=True, exist_ok=True)
-        self._sidecar_path.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        """True if the storage backend contains at least one parent."""
+        return self._parent_storage.count() > 0
