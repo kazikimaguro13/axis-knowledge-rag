@@ -211,6 +211,99 @@ server {
 
 ---
 
+## Session Persistence (spec_036)
+
+Chat session storage is now pluggable. `config.yml > chat.storage.backend`
+picks the implementation:
+
+| Backend  | When                                                | Restart-safe | Multi-worker | Multi-host |
+|----------|-----------------------------------------------------|--------------|--------------|------------|
+| `sqlite` (default) | Personal / single-host deployments        | Yes          | Yes (WAL)    | No         |
+| `memory` | Tests, ephemeral local runs                         | No           | No           | No         |
+| `redis`  | Multi-worker / multi-host production                | Yes          | Yes          | Yes        |
+
+### SQLite default — single worker no longer required
+
+v0.7 required `uvicorn --workers 1` (sessions lived in one process).
+v0.8+ defaults to a SQLite file (`~/.axis_chat.db` by default) which is
+safe across workers thanks to WAL journal mode:
+
+```bash
+# now safe
+uvicorn backend.src.api:app --workers 4 --port 8000
+
+# pick the path with config.yml
+# chat:
+#   storage:
+#     backend: "sqlite"
+#     sqlite_path: "./data/chat.db"    # or absolute path
+```
+
+Restart persistence:
+
+```bash
+SID=$(curl -s -X POST http://localhost:8000/api/chat \
+  -H 'Content-Type: application/json' \
+  -d '{"question": "Persistence test"}' | jq -r .session_id)
+
+# kill + restart
+pkill -f uvicorn && sleep 2
+uvicorn backend.src.api:app --port 8000 &
+sleep 3
+
+curl -s "http://localhost:8000/api/chat/$SID" | jq '.messages | length'
+# → 2 (history survived)
+```
+
+### Redis backend (optional)
+
+Use when you need cross-host or unlimited horizontal scale.
+
+```bash
+# 1. install the optional dependency
+pip install -e ".[redis]"
+
+# 2. start Redis via the docker-compose profile
+docker compose --profile redis-backend up -d redis
+
+# 3. flip the backend in config.yml
+cat >> config.yml <<'EOF'
+chat:
+  storage:
+    backend: "redis"
+    redis_url: "redis://localhost:6379/0"
+EOF
+
+# 4. boot the API
+uvicorn backend.src.api:app --workers 4
+```
+
+Recommended Redis config for production:
+
+```
+maxmemory 256mb
+maxmemory-policy allkeys-lru
+appendonly yes
+```
+
+`docker-compose.yml` already passes these via `command:` in the
+`redis-backend` profile.
+
+### Privacy mode (no disk)
+
+For ephemeral or privacy-sensitive deployments:
+
+```yaml
+chat:
+  storage:
+    backend: "memory"
+```
+
+Sessions live only in the worker process and are gone on restart. This
+is the v0.7 behaviour.
+
+---
+
 ## CI / CD (GitHub Actions)
 
 現在の CI 構成:

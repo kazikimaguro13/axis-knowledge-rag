@@ -2,6 +2,26 @@
 
 ## [Unreleased]
 
+### Day 36 (2026-05-14) — Pluggable Session Persistence (spec_036)
+
+v0.7 の `ConversationStore` は in-memory dict + `threading.Lock` で、`uvicorn --workers > 1` だと session が worker 間で共有されず、プロセス再起動で 24h TTL の意味も失う致命傷があった。spec_036 で **Protocol + 3 backend** に再設計し、default を **SqliteStore** に切り替え。
+
+- backend/src/conversation.py: `ConversationStore` を `typing.Protocol` (`@runtime_checkable`) に変更。`MemoryStore` (旧 in-memory 実装をリネーム), `SqliteStore` (stdlib `sqlite3` + WAL + FK CASCADE), `RedisStore` (optional dep) の 3 実装を追加。factory `make_conversation_store(chat_cfg)` が `chat.storage.backend` に応じて構築、失敗時は warning + `MemoryStore` fallback。すべて `has(session_id)` メソッドを追加して API 側の `_sessions` 内部アクセスを排除
+- backend/src/config.py: `StorageConfig(backend, sqlite_path, redis_url)` を追加、`ChatConfig.storage` field をぶら下げ。`load_app_config()` で `chat.storage.*` を typed パース
+- config.yml: `chat.storage.{backend, sqlite_path, redis_url}` を追加 (default `backend: "sqlite"` / `sqlite_path: "~/.axis_chat.db"`)
+- backend/src/api.py: lifespan で `make_conversation_store(app_cfg.chat)` を使用、shutdown 時に `store.close()` 呼び出し。`get_chat_history` の `store._sessions` 直接参照を `_store_has()` helper (`has()` メソッド経由) に置換
+- mcp_server/_session.py: `ConversationStore(...)` → `MemoryStore(...)` に変更 (MCP プロセスは自己完結なので in-memory で十分、コメントで意図を明記)
+- pyproject.toml: `[project.optional-dependencies]` に `redis = ["redis>=5.0,<6"]` を追加 (default install には含めない)
+- docker-compose.yml: `redis` service を `profiles: ["redis-backend"]` で optional 追加 (appendonly + allkeys-lru)。`redis-data` named volume も追加
+- backend/tests/test_conversation.py: 既存 12 件を `parametrize("memory","sqlite", indirect=True)` で共通 contract test に再編 (14 件 × 2 backend = 28 件)。MemoryStore 固有の TTL/LRU eviction (内部 dict 参照) は別関数として残置
+- backend/tests/test_conversation_sqlite.py: 新規 9 件 — persists_across_instances / concurrent_writes (10 thread × 10 append) / eviction_cleans_messages (FK CASCADE) / db_file_creation (nested parent dir) / wal_mode_active / sqlite_lru_eviction / close_idempotent / use_after_close_raises / concurrent_reads_during_write
+- backend/tests/test_conversation_redis.py: 新規 6 件 — pytest.importorskip + skipif (Redis 未起動時) で optional。persistence / TTL applied / pipeline atomic / delete / history truncation / short-TTL expiry
+- backend/tests/test_rag.py: `ConversationStore()` → `MemoryStore()` に書き換え (3 箇所)
+- docs/adr/ADR-022-session-persistence.md: 新規 ADR — Context (worker 多重化 + 再起動で session 喪失) / Decision (Protocol + 3 backend, default SQLite) / Alternatives (a) pickle dump (b) JSON+lock (c) SQLite ✓ (d) Redis ✓ optional (e) PostgreSQL ✗
+- docs/deployment.md: §Session Persistence を追加 — 3 backend 比較表 + SQLite restart シナリオ + Redis 起動手順 + privacy mode (`backend: "memory"`)
+- 既存 291 tests に回帰なし、合計 **317 passed + 1 skipped** (redis 未インストール)、ruff 緑
+- **後方非互換注意**: v0.7 で `from backend.src.conversation import ConversationStore` を class として呼んでいたコードは Protocol 化により壊れる。in-repo callers は全て更新済み、外部利用者は `MemoryStore` か factory に置換が必要
+
 ### Day 40 (2026-05-14) — GraphRAG + 3D Knowledge Graph (spec_040)
 
 v0.8 マーキー機能。YAML frontmatter の `refs:` フィールドを *初めて* 検索 / 可視化のソースとして活用する。
