@@ -2,6 +2,32 @@
 
 ## [Unreleased]
 
+### Day 39 (2026-05-14) — Code-fence aware citation parser (spec_039)
+
+v0.7 で「許容、v0.8 候補」としていた **Markdown コードフェンス内 `[1]` の偽陽性** を潰す。
+` ```python\nx = arr[1]\n``` ` のようなコード片中の `[1]` が citation marker として描画
+されていた問題を解消。backend / frontend の parser に同じスキップロジックを実装し、
+対称性を維持。
+
+- backend/src/_citations.py: `_RE_CODE_SPANS` を追加 (fenced ` ```...``` ` + inline
+  ` `...` `)。`_build_skip_ranges()` / `_is_in_skip_range()` ヘルパで marker 位置が
+  code 範囲内かを判定し、`parse_and_validate_citations()` は skip 範囲内の marker を
+  リテラルとして保存、`extract_citations()` は単純にスキップ。新規依存なし
+- frontend/src/lib/citations.ts: backend と同じ regex パターン (JS では `re.DOTALL`
+  が無いので `[\s\S]` で代用) を `RE_CODE_SPANS` として定義。`buildSkipRanges()` /
+  `isInSkipRange()` で同等のスキップ動作を実装
+- backend/tests/test_citations.py: `test_code_fence_*` 5 件追加 (fenced inside / inline
+  / language identifier / extract_citations skip / multiple fences + inline mix)。
+  既存 13 件と合わせて 18 件
+- frontend/__tests__/citations.test.ts: 新規 5 件 (code fence skip / inline / lang
+  identifier / multiple fences / regression check)。frontend テストランナーは未導入
+  なので CI では実行されないが、`tsc --noEmit` は緑 (ambient declare で jest 型を
+  shim)
+- docs/adr/ADR-020-citation-highlighting.md: Update 節を追加。v0.8 で fence skip
+  実装、backend と frontend の対称性、ネスト未対応の Open Questions を記録
+- 既存 310 tests に回帰なし、合計 **315 passed + 1 skipped** (redis 未インストール)、
+  ruff 緑、`npx tsc --noEmit` 緑
+
 ### Day 37 (2026-05-14) — Parent Storage: JSON → SQLite migration (spec_037)
 
 v0.8 hardening。spec_031 で導入した `parents.json` を SQLite (`parents.db`) に置換し、
