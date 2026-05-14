@@ -98,6 +98,11 @@ def main() -> int:
         default=0.05,
         help="Warn if any metric drops by more than this fraction vs baseline.",
     )
+    p.add_argument(
+        "--block-on-regression",
+        action="store_true",
+        help="Exit 1 if any metric drops > --regression-threshold from baseline (v0.8+)",
+    )
     args = p.parse_args()
 
     engine, pipeline = _build_pipeline()
@@ -127,7 +132,10 @@ def main() -> int:
         args.baseline.write_text(json.dumps(record, indent=2, ensure_ascii=False))
         print(f"\nBaseline updated: {args.baseline}")
 
-    # v0.7: WARN only — exit 0 regardless of regressions. v0.8 will block.
+    if args.block_on_regression and regressions:
+        print(f"\n## BLOCK: {len(regressions)} metrics regressed beyond threshold")
+        return 1
+
     return 0
 
 

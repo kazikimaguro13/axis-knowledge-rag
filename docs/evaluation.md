@@ -166,6 +166,22 @@ python -m evaluation.run_ragas \
 cat /tmp/smoke.json | jq .scores
 ```
 
+## A/B Test
+
+`config.yml > retrieval.time_decay.enabled` などの opt-in 機能の効果を測る:
+
+```bash
+make eval-abtest                                # time_decay.enabled の A/B
+python -m evaluation.run_abtest \
+    --dataset evaluation/datasets/qa_v1.json \
+    --flag retrieval.parent_doc.enabled \
+    --output evaluation/runs/abtest-pd.json
+```
+
+paired t-test で有意性 (p < 0.05) を判定。**結果が有意でなければ default を変更しない**、というのが運用方針。
+
+CI: `.github/workflows/ragas-abtest.yml` を `workflow_dispatch` で起動可能。
+
 ## 将来の拡張
 
 | spec | 内容 |

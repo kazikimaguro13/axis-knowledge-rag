@@ -1,0 +1,54 @@
+name: RAGAS A/B Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      flag:
+        description: "config.yml dotted key (e.g. time_decay.enabled)"
+        required: true
+        default: "time_decay.enabled"
+
+jobs:
+  abtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[eval]"
+
+      - name: Build index
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: python scripts/build_index.py --rebuild
+
+      - name: Run A/B test
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          mkdir -p evaluation/runs
+          python -m evaluation.run_abtest \
+            --dataset evaluation/datasets/qa_v1.json \
+            --flag "${{ inputs.flag }}" \
+            --output evaluation/runs/abtest-${{ github.sha }}.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: abtest-${{ github.sha }}
+          path: evaluation/runs/abtest-*.json
+
+      - name: Post summary
+        run: |
+          python -c "
+          from pathlib import Path
+          from evaluation.report import generate_abtest_report
+          print(generate_abtest_report(Path('evaluation/runs/abtest-${{ github.sha }}.json')))
+          " >> $GITHUB_STEP_SUMMARY

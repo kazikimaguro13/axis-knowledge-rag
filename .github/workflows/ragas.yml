@@ -48,36 +48,36 @@ jobs:
             --output evaluation/runs/ci-${{ github.sha }}.json
         continue-on-error: true  # v0.7: WARN only
 
-      - name: Comment scores on PR
+      - name: Generate PR comment
+        if: github.event_name == 'pull_request'
+        run: |
+          python -c "
+          from pathlib import Path
+          from evaluation.report import generate_ragas_report
+          comment = generate_ragas_report(
+              Path('evaluation/runs/ci-${{ github.sha }}.json'),
+              Path('evaluation/baseline.json'),
+          )
+          Path('/tmp/comment.md').write_text(comment)
+          "
+
+      - name: Post PR comment
         if: github.event_name == 'pull_request'
         uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
-            const runFile = `evaluation/runs/ci-${{ github.sha }}.json`;
-            if (!fs.existsSync(runFile)) {
-              console.log('Run output not found, skipping comment.');
+            const commentFile = '/tmp/comment.md';
+            if (!fs.existsSync(commentFile)) {
+              console.log('Comment file not found, skipping.');
               return;
             }
-            const out = JSON.parse(fs.readFileSync(runFile));
-            const base = JSON.parse(fs.readFileSync('evaluation/baseline.json'));
-            const lines = [
-              '## RAGAS scores',
-              '',
-              '| metric | this PR | baseline | Δ |',
-              '|---|---|---|---|',
-            ];
-            for (const k of Object.keys(out.scores)) {
-              const v = out.scores[k].toFixed(4);
-              const b = (base.scores[k] || 0).toFixed(4);
-              const d = (out.scores[k] - (base.scores[k] || 0)).toFixed(4);
-              lines.push(`| ${k} | ${v} | ${b} | ${d} |`);
-            }
+            const body = fs.readFileSync(commentFile, 'utf-8');
             github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: lines.join('\n'),
+              body: body,
             });
 
       - name: Upload run artifact
