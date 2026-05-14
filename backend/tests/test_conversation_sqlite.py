@@ -185,3 +185,75 @@ def test_concurrent_reads_during_write(tmp_path: Path) -> None:
             reader.close()
     finally:
         store.close()
+
+
+# ---------------------------------------------------------------------------
+# spec_042 MID #3 — last_access index for TTL / LRU eviction scans
+# ---------------------------------------------------------------------------
+
+
+def test_idx_sessions_last_access_exists(tmp_path: Path) -> None:
+    """Schema creates ``idx_sessions_last_access`` on the sessions table."""
+    store = SqliteStore(db_path=str(tmp_path / "idx.db"))
+    try:
+        rows = store._conn.execute(  # noqa: SLF001
+            "SELECT name FROM sqlite_master "
+            "WHERE type='index' AND tbl_name='sessions'"
+        ).fetchall()
+        names = {r[0] for r in rows}
+        assert "idx_sessions_last_access" in names
+    finally:
+        store.close()
+
+
+def test_existing_db_gets_index_on_reopen(tmp_path: Path) -> None:
+    """``CREATE INDEX IF NOT EXISTS`` makes migration of older DBs idempotent.
+
+    Simulate a v0.8.0 DB (no index) and verify that re-opening with
+    SqliteStore adds the index without losing data.
+    """
+    db_path = tmp_path / "legacy.db"
+    # Hand-craft a v0.8.0-shaped DB without the new index.
+    conn = sqlite3.connect(str(db_path))
+    conn.executescript(
+        """
+        CREATE TABLE sessions (
+            session_id TEXT PRIMARY KEY,
+            last_access REAL NOT NULL
+        );
+        CREATE TABLE messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT NOT NULL,
+            role TEXT NOT NULL,
+            content TEXT NOT NULL,
+            sources_json TEXT,
+            timestamp REAL NOT NULL,
+            FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
+        );
+        CREATE INDEX idx_messages_session ON messages(session_id, id);
+        """
+    )
+    # Insert a session whose last_access is "now" so it survives the TTL purge
+    # that runs in SqliteStore.__init__.
+    now = datetime.now(UTC).timestamp()
+    conn.execute(
+        "INSERT INTO sessions (session_id, last_access) VALUES ('legacy', ?)",
+        (now,),
+    )
+    conn.commit()
+    conn.close()
+
+    store = SqliteStore(db_path=str(db_path))
+    try:
+        names = {
+            r[0]
+            for r in store._conn.execute(  # noqa: SLF001
+                "SELECT name FROM sqlite_master "
+                "WHERE type='index' AND tbl_name='sessions'"
+            ).fetchall()
+        }
+        assert "idx_sessions_last_access" in names
+        # data survived migration
+        assert store.has("legacy") is True
+    finally:
+        store.close()

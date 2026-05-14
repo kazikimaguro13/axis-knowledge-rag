@@ -173,18 +173,33 @@ def load_app_config(path: Path | None = None) -> AppConfig:
 
     Missing keys / missing file → all defaults. Unknown keys are ignored
     so older config files keep working.
+
+    spec_042: After loading, ``EVAL_OVERRIDE_FLAG`` env var (if set) can
+    override any dotted key in the result (used by ``run_abtest.py``).
+    Format: ``"retrieval.time_decay.enabled=true;chat.enabled=false"``.
     """
     import yaml
 
     config_path = path or Path("./config.yml")
     if not config_path.exists():
-        return AppConfig()
-    try:
-        with open(config_path, encoding="utf-8") as f:
-            raw = yaml.safe_load(f) or {}
-    except OSError:
-        return AppConfig()
+        cfg = AppConfig()
+    else:
+        try:
+            with open(config_path, encoding="utf-8") as f:
+                raw = yaml.safe_load(f) or {}
+        except OSError:
+            cfg = AppConfig()
+        else:
+            cfg = _build_app_config(raw)
 
+    override = os.environ.get("EVAL_OVERRIDE_FLAG", "").strip()
+    if override:
+        cfg = _apply_override_flags(cfg, override)
+    return cfg
+
+
+def _build_app_config(raw: dict) -> AppConfig:
+    """Convert raw yaml dict → typed AppConfig (defaults fill the gaps)."""
     retr_raw = (raw.get("retrieval") or {}) if isinstance(raw, dict) else {}
     pd_raw = (retr_raw.get("parent_doc") or {}) if isinstance(retr_raw, dict) else {}
     td_raw = (retr_raw.get("time_decay") or {}) if isinstance(retr_raw, dict) else {}
@@ -249,3 +264,74 @@ def load_app_config(path: Path | None = None) -> AppConfig:
         chat=chat,
         graph=graph,
     )
+
+
+# ---------------------------------------------------------------------------
+# spec_042: EVAL_OVERRIDE_FLAG wiring (used by evaluation/run_abtest.py)
+# ---------------------------------------------------------------------------
+
+
+def _apply_override_flags(cfg: AppConfig, override: str) -> AppConfig:
+    """Apply ``dotted.key=value`` overrides to ``cfg`` from EVAL_OVERRIDE_FLAG.
+
+    Multiple overrides are ``;``-separated. Values are coerced to bool / int /
+    float / str (in that order). Unknown keys are logged at WARNING level and
+    silently skipped — we never raise so a stale env var can't take the API
+    down.
+    """
+    _log = logging.getLogger(__name__)
+    new_cfg = cfg
+    for pair in override.split(";"):
+        pair = pair.strip()
+        if not pair or "=" not in pair:
+            continue
+        key, _, value = pair.partition("=")
+        key = key.strip()
+        value_typed = _coerce_value(value.strip())
+        try:
+            new_cfg = _replace_dotted(new_cfg, key, value_typed)
+            _log.info("EVAL_OVERRIDE_FLAG: applied %s=%r", key, value_typed)
+        except (KeyError, AttributeError, TypeError) as e:
+            _log.warning("EVAL_OVERRIDE_FLAG: unknown key %r ignored (%s)", key, e)
+    return new_cfg
+
+
+def _coerce_value(s: str) -> bool | int | float | str:
+    """Best-effort scalar coercion: bool > int > float > str."""
+    low = s.lower()
+    if low == "true":
+        return True
+    if low == "false":
+        return False
+    try:
+        return int(s)
+    except ValueError:
+        pass
+    try:
+        return float(s)
+    except ValueError:
+        pass
+    return s
+
+
+def _replace_dotted(cfg, dotted_key: str, value):
+    """Return a new (frozen) dataclass with ``dotted_key`` replaced by ``value``.
+
+    e.g. ``_replace_dotted(cfg, "retrieval.time_decay.enabled", True)`` returns
+    a new ``AppConfig`` with that nested field flipped, leaving all other
+    fields untouched (each enclosing dataclass is rebuilt via
+    ``dataclasses.replace``).
+    """
+    import dataclasses
+
+    parts = [p for p in dotted_key.split(".") if p]
+    if not parts:
+        raise KeyError(dotted_key)
+    head, *rest = parts
+    if not hasattr(cfg, head):
+        raise KeyError(head)
+    if not rest:
+        return dataclasses.replace(cfg, **{head: value})
+    inner = getattr(cfg, head)
+    new_inner = _replace_dotted(inner, ".".join(rest), value)
+    return dataclasses.replace(cfg, **{head: new_inner})

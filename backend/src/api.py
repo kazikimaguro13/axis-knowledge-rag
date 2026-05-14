@@ -1,5 +1,6 @@
 """FastAPI surface for axis-knowledge-rag."""
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -71,8 +72,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         parent_doc_enabled = pd.enabled
     graph: KnowledgeGraph | None = None
     if app_cfg.graph.enabled:
+        # spec_042 LOW #5: building the graph walks the knowledge dir + parses
+        # frontmatter, which can stall lifespan for seconds on 1000+ doc
+        # corpora. Run it on the default executor so the event loop stays
+        # responsive (e.g. for liveness probes).
+        loop = asyncio.get_running_loop()
         try:
-            graph = build_default_graph(app_cfg.graph.knowledge_dir)
+            graph = await loop.run_in_executor(
+                None, build_default_graph, app_cfg.graph.knowledge_dir
+            )
             logger.info("knowledge graph stats: %s", graph.stats())
         except Exception as e:  # noqa: BLE001
             logger.warning("failed to build knowledge graph: %s — disabling /api/graph", e)

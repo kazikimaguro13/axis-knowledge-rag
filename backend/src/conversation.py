@@ -194,6 +194,9 @@ class SqliteStore:
         session_id TEXT PRIMARY KEY,
         last_access REAL NOT NULL
     );
+    -- spec_042 MID #3: TTL eviction + LRU pick both scan by last_access;
+    -- without this index they become O(N) over the whole sessions table.
+    CREATE INDEX IF NOT EXISTS idx_sessions_last_access ON sessions(last_access);
     CREATE TABLE IF NOT EXISTS messages (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         session_id TEXT NOT NULL,
@@ -504,6 +507,13 @@ class RedisStore:
         return bool(r.exists(self._meta_key(session_id)))
 
     def __len__(self) -> int:
+        """Return active session count.
+
+        Note: uses ``SCAN_ITER`` over all meta keys, which is **O(K)** where K
+        is the number of keys in Redis. Avoid on hot paths in large
+        deployments (multi-host / millions of keys) — prefer external admin
+        tooling for capacity monitoring (spec_042 LOW #4).
+        """
         r = self._require_client()
         count = 0
         for _ in r.scan_iter(f"{self.META_PREFIX}:*:meta"):

@@ -2,6 +2,41 @@
 
 ## [Unreleased]
 
+### Day 42 (2026-05-14) — v0.8 review fixes (spec_041 HIGH/MID/LOW 5 件解消) (spec_042)
+
+spec_041 のレビューで指摘された 5 件 (HIGH 1 + MID 2 + LOW 2) を一括解消。
+A 判定昇格を狙う patch release (v0.8.1)。
+
+- **[HIGH]** backend/src/config.py: `EVAL_OVERRIDE_FLAG` を `load_app_config()`
+  に wire (spec_038 で wire 漏れ + spec_041 review で指摘)。`_build_app_config(raw)`
+  を切り出し、末尾で `_apply_override_flags(cfg, override)` を適用。dotted-key
+  =value 形式、複数 key は `;` 区切り、型強制 (bool > int > float > str)、
+  unknown key は WARNING + skip。これで spec_038 の A/B テストが initial 以来初めて
+  effective に動作する
+- **[MID]** backend/src/parent_storage.py: `SqliteParentStorage.get_many()` を
+  `SQLITE_VARIABLE_LIMIT=999` で chunking 実装に変更。1000+ docs での
+  `OperationalError: too many SQL variables` を解消。入力順序は保持
+- **[MID]** backend/src/conversation.py: `SqliteStore.SCHEMA` に
+  `idx_sessions_last_access` index を追加。`CREATE INDEX IF NOT EXISTS` で
+  既存 DB は再オープン時に冪等 migrate。TTL / LRU eviction scan が O(N) →
+  O(log N)
+- **[LOW]** backend/src/conversation.py: `RedisStore.__len__()` docstring に
+  「`SCAN_ITER` は O(K) — hot path で使うな」注記
+- **[LOW]** backend/src/api.py: lifespan の `build_default_graph()` を
+  `asyncio.get_running_loop().run_in_executor(None, ...)` でスレッドオフロード。
+  1000+ docs 起動時の event loop ブロックを解消
+- backend/tests/test_parent_storage.py: `TestSqliteSpecificScaling` 3 件追加
+  (999 / 1000 / 2500 ids)
+- backend/tests/test_conversation_sqlite.py: 2 件追加
+  (`test_idx_sessions_last_access_exists` + 既存 DB に index が migrate
+  されるテスト)
+- evaluation/tests/test_run_abtest_integration.py: **新規**。6 件
+  (single key / multi key / unknown key warning / no-env / type coercion / chat.enabled)
+- docs/adr/ADR-019-ragas-evaluation.md: spec_042 Update 節を追加 — wiring 仕様、
+  型強制表、silent fail の方針
+- docs/configuration.md: 末尾に `EVAL_OVERRIDE_FLAG` 環境変数セクションを追加
+- 既存 tests に回帰なし、新規 11 件 PASS、ruff 緑
+
 ### Day 39 (2026-05-14) — Code-fence aware citation parser (spec_039)
 
 v0.7 で「許容、v0.8 候補」としていた **Markdown コードフェンス内 `[1]` の偽陽性** を潰す。

@@ -94,3 +94,33 @@ GraphRAG + knowledge-graph settings (spec_040).
 | `max_neighbors_per_query` | int | `20` | Cap on neighbors returned per query. |
 | `expand_on_search` | bool | `false` | Automatically expand search results with 1-hop graph neighbors. |
 | `knowledge_dir` | string | `"./examples/knowledge"` | Directory scanned at startup to build the graph. |
+
+---
+
+## Environment variables
+
+### `EVAL_OVERRIDE_FLAG` (spec_042)
+
+Used by `evaluation/run_abtest.py` to flip one or more config keys at load
+time without editing `config.yml`. Read once at the end of
+`load_app_config()`; format is `dotted.key=value` pairs separated by `;`.
+
+```bash
+# A/B test time_decay enabled vs disabled
+EVAL_OVERRIDE_FLAG="retrieval.time_decay.enabled=true" \
+  python -m evaluation.run_abtest \
+    --dataset evaluation/datasets/qa_v1.json \
+    --flag time_decay.enabled \
+    --output evaluation/runs/abtest.json
+
+# Flip multiple keys at once
+EVAL_OVERRIDE_FLAG="retrieval.time_decay.enabled=true;chat.enabled=false" \
+  python -m backend.src.api
+```
+
+Value coercion: `"true"`/`"false"` → bool, integer-like → int, float-like
+→ float, otherwise string. Unknown keys are silently warning-logged so a
+stale env var can't take the API down.
+
+> **Note**: values containing `;` (e.g. URLs with query strings) are not
+> currently supported. Use a single override in that case.
