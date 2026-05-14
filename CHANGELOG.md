@@ -2,6 +2,25 @@
 
 ## [Unreleased]
 
+### Day 38 (2026-05-14) — RAGAS regression blocking + A/B 評価 (spec_038)
+
+v0.7 の RAGAS CI を hardening。regression を block する仕組みと、config flag の A/B 評価基盤を追加。
+
+- evaluation/stats.py: **新規**。`TTestResult` frozen dataclass + `paired_t_test(scores_a, scores_b)` — scipy optional (未インストール時は `None` を返し graceful degradation)。同一長・2 件以上のチェックで `ValueError`
+- evaluation/run_abtest.py: **新規**。`--dataset` / `--flag` / `--output` 引数。config flag を false / true で 2 回 pipeline を走らせ、per-question スコアを `paired_t_test` に渡す。結果を JSON + Markdown テーブルで出力
+- evaluation/report.py: **新規**。`generate_ragas_report(run_path, baseline_path)` — baseline 有無で表形式を切り替え。`generate_abtest_report(abtest_path)` — paired t-test 結果を PR コメント用 Markdown に整形
+- evaluation/run_ragas.py: `--block-on-regression` フラグ追加 (default off)。regression あり + flag 有効時に `return 1`。既存引数との互換を維持
+- evaluation/requirements.txt + pyproject.toml: `scipy>=1.10,<2` を eval extras に追加 (本体実行に不要)
+- .github/workflows/ragas.yml: PR コメントを `generate_ragas_report()` 経由に刷新。Generate + Post の 2 ステップ構成
+- .github/workflows/ragas-abtest.yml: **新規**。`workflow_dispatch` のみ。`inputs.flag` を受け取り A/B を実行 → artifact 保存 → `$GITHUB_STEP_SUMMARY` にレポート出力
+- Makefile: `eval-abtest` ターゲット追加 (`time_decay.enabled` A/B をワンライナーで実行)
+- evaluation/tests/test_stats.py: 新規 5 件 (identical p > 0.99 / 明確差 p < 0.001 / 長さ不一致 / 少数サンプル / scipy 不在 skip)
+- evaluation/tests/test_report.py: 新規 3 件 (baseline あり / なし / A/B レポート)
+- evaluation/tests/test_run_ragas.py: 新規 2 件 (skip: ragas mock 必要)
+- docs/adr/ADR-019-ragas-evaluation.md: Update 節追加 (blocking 方針 + A/B 設計 + コスト追記)
+- docs/evaluation.md: A/B Test セクション追加
+- 既存 304+ tests に回帰なし、新規 10 件追加 (8 pass + 2 skip)、ruff 緑
+
 ### Day 37 (2026-05-14) — Parent Storage: JSON → SQLite migration (spec_037)
 
 v0.8 hardening。spec_031 で導入した `parents.json` を SQLite (`parents.db`) に置換し、
