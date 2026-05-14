@@ -61,6 +61,43 @@ def _flatten_axes_with_norm(
     return out
 
 
+_KATAKANA_RANGE = (0x30A1, 0x30F6)
+_HIRAGANA_RANGE = (0x3041, 0x3096)
+
+
+def _warn_if_parents_look_normalized(parents: list[ParentChunk]) -> None:
+    """Heuristic check (spec_043) for legacy parents indexed before the bugfix.
+
+    v0.8.1 and earlier ran chunker on ``normalized_body`` (NFKC + katakana →
+    hiragana + lowercase), so stored parent text was unreadable for the UI.
+    If we sample a handful of parents and they have plenty of hiragana but
+    *zero* katakana and *zero* uppercase ASCII, the index was almost certainly
+    built with the old code path. Log a warning recommending a rebuild — we
+    do NOT auto-rebuild to avoid surprising data loss.
+    """
+    if not parents:
+        return
+    suspicious = 0
+    sample = parents[: min(5, len(parents))]
+    for p in sample:
+        text = p.text or ""
+        if not text:
+            continue
+        has_hira = any(_HIRAGANA_RANGE[0] <= ord(c) <= _HIRAGANA_RANGE[1] for c in text)
+        has_kata = any(_KATAKANA_RANGE[0] <= ord(c) <= _KATAKANA_RANGE[1] for c in text)
+        has_upper = any(c.isascii() and c.isupper() for c in text)
+        # A genuine JP doc with this much hiragana almost always carries some
+        # katakana too; pure hiragana + no uppercase ASCII is the smoking gun.
+        if has_hira and not has_kata and not has_upper:
+            suspicious += 1
+    if suspicious >= 2:  # at least two of five samples → likely normalized
+        logger.warning(
+            "parents.db looks normalized (no katakana / no uppercase in sampled text). "
+            "v0.8.2 (spec_043) stores parent text as the original body — please rebuild "
+            "with: python -m scripts.build_index <knowledge_dir> --rebuild"
+        )
+
+
 class VectorStore:
     """ChromaDB-backed store for Document embeddings + axis metadata."""
 
@@ -296,6 +333,7 @@ class VectorStore:
         if hasattr(self._parent_storage, "list_all"):
             parents = self._parent_storage.list_all()  # type: ignore[attr-defined]
             self._parents = {p.parent_id: p for p in parents}
+            _warn_if_parents_look_normalized(list(self._parents.values()))
         return len(self._parents)
 
     @property
