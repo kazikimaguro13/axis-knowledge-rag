@@ -32,14 +32,23 @@ export function GraphSidebar({ docId, onClose }: Props) {
 
   if (!docId) {
     return (
-      <aside className="border-l bg-slate-50 p-4 text-sm text-slate-500">
-        ノードをクリックすると詳細と隣接ドキュメントが表示されます。
+      <aside className="border-l-2 border-slate-200 bg-white p-4 text-sm text-slate-500 shadow-sm">
+        <div className="flex flex-col items-start gap-2">
+          <span className="text-base">🕸️</span>
+          <p>
+            ノードを<strong>クリック</strong>すると、その doc の詳細と
+            <strong>参照グラフの隣接ノード</strong>が表示されます。
+          </p>
+          <p className="text-xs text-slate-400">
+            ドラッグで視点回転、スクロールでズーム。
+          </p>
+        </div>
       </aside>
     );
   }
 
   return (
-    <aside className="overflow-y-auto border-l bg-white p-4 text-sm">
+    <aside className="overflow-y-auto border-l-2 border-slate-200 bg-white p-4 text-sm shadow-sm">
       <button
         onClick={onClose}
         className="mb-2 text-xs text-slate-500 hover:underline"
