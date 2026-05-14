@@ -24,6 +24,7 @@ from backend.src.bm25_index import BM25Index
 from backend.src.chunker import ParentChunk
 from backend.src.config import TimeDecayConfig
 from backend.src.embedder import Embedder
+from backend.src.graph import KnowledgeGraph
 from backend.src.normalizer import Normalizer
 from backend.src.vector_store import VectorStore
 
@@ -154,6 +155,7 @@ class SearchEngine:
         parent_doc_enabled: bool = False,
         top_k_children: int = 20,
         time_decay_config: TimeDecayConfig | None = None,
+        graph: KnowledgeGraph | None = None,
     ) -> None:
         self._store = store
         self._embedder = embedder
@@ -162,6 +164,7 @@ class SearchEngine:
         self._parent_doc_enabled = parent_doc_enabled
         self._top_k_children = top_k_children
         self._time_decay_config = time_decay_config
+        self._graph = graph
         if parent_doc_enabled and not store.parents:
             # Try lazy-load from sidecar so callers can build the engine
             # without remembering the load step.
@@ -174,6 +177,10 @@ class SearchEngine:
     def parent_doc_enabled(self) -> bool:
         return self._parent_doc_enabled
 
+    @property
+    def graph(self) -> KnowledgeGraph | None:
+        return self._graph
+
     def search(
         self,
         query: str | None,
@@ -181,8 +188,11 @@ class SearchEngine:
         filters: dict[str, Any] | None = None,
         top_k: int = 5,
         bm25_weight: float = 0.5,
+        graph_expand: bool = False,
+        graph_hop: int = 1,
+        graph_max_neighbors: int = 10,
     ) -> list[SearchResult]:
-        """Hybrid search (axis + vector + optional BM25 fusion).
+        """Hybrid search (axis + vector + optional BM25 fusion + optional graph expand).
 
         Args:
             query: Natural-language query. If None, axis-only search (top_k arbitrary).
@@ -193,6 +203,12 @@ class SearchEngine:
                 vector-only behaviour, ``1.0`` ranks purely by BM25. Ignored
                 when no ``bm25_index`` is wired into the engine or when the
                 query is ``None``.
+            graph_expand: spec_040. If True and the engine has a graph
+                wired, merge 1-hop refs neighbours of the top 5 hits into
+                the result set with a 0.7× score decay relative to their
+                source.
+            graph_hop: BFS depth for graph expansion (default 1).
+            graph_max_neighbors: per-source neighbour cap.
 
         Query / filters are normalized before being passed to Chroma so that
         the index (which stores `axis_*_norm` keys) can match across writing
@@ -211,9 +227,14 @@ class SearchEngine:
         )
 
         if self._parent_doc_enabled:
-            return self._search_parent_doc(
+            pd_results = self._search_parent_doc(
                 query, where=where, top_k=top_k, bm25_weight=bm25_weight
             )
+            if graph_expand:
+                pd_results = self._expand_with_graph(
+                    pd_results, hop=graph_hop, max_neighbors=graph_max_neighbors
+                )
+            return pd_results
 
         if query is None:
             # Axis-only path: use a zero embedding (Chroma will then sort by
@@ -260,11 +281,19 @@ class SearchEngine:
             results.sort(key=lambda r: r.score, reverse=True)
             results = results[:top_k]
 
+        # spec_040: graph expansion (post-decay). Adds 1-hop refs neighbours
+        # of the top hits with a 0.7× decay multiplier. Caller-opt-in only.
+        if graph_expand:
+            results = self._expand_with_graph(
+                results, hop=graph_hop, max_neighbors=graph_max_neighbors
+            )
+
         logger.info(
-            "search(query=%r, filters=%s, bm25_weight=%.2f) -> %d results",
+            "search(query=%r, filters=%s, bm25_weight=%.2f, graph_expand=%s) -> %d results",
             query,
             filters,
             bm25_weight,
+            graph_expand,
             len(results),
         )
         return results
@@ -374,6 +403,119 @@ class SearchEngine:
             body_full=parent.text,
             metadata=dict(meta),
         )
+
+    # -----------------------------------------------------------------
+    # spec_040: graph-based retrieval expansion
+    # -----------------------------------------------------------------
+
+    _GRAPH_EXPANSION_DECAY = 0.7
+
+    def _expand_with_graph(
+        self,
+        results: list[SearchResult],
+        *,
+        hop: int,
+        max_neighbors: int,
+    ) -> list[SearchResult]:
+        """Append refs-graph neighbours of the top hits to ``results``.
+
+        Neighbour score = source score × 0.7 (so direct hits always
+        outrank graph-expanded ones for the same source). Deduplicates
+        against already-present ids. Returns a re-sorted list, never
+        truncated — the caller decides if/when to slice.
+        """
+        if self._graph is None:
+            logger.warning(
+                "graph_expand=True but no KnowledgeGraph wired into engine — skipping"
+            )
+            return results
+        if not results:
+            return results
+
+        seen: set[str] = {r.id for r in results}
+        # Top 5 seed sources for expansion (spec_040 §3-2).
+        seeds = results[:5]
+        expanded: list[SearchResult] = list(results)
+        for src in seeds:
+            seed_doc_id = self._seed_doc_id(src)
+            if not seed_doc_id:
+                continue
+            neighbours = self._graph.neighbors_within_hop(
+                seed_doc_id,
+                hop=hop,
+                max_neighbors=max_neighbors,
+            )
+            for nid in neighbours:
+                if nid in seen:
+                    continue
+                neighbour = self._fetch_doc_as_result(
+                    nid, score=src.score * self._GRAPH_EXPANSION_DECAY
+                )
+                if neighbour is None:
+                    continue
+                seen.add(nid)
+                expanded.append(neighbour)
+        expanded.sort(key=lambda r: r.score, reverse=True)
+        return expanded
+
+    @staticmethod
+    def _seed_doc_id(result: SearchResult) -> str:
+        """Pick the file-level doc id for graph lookup.
+
+        Parent-doc results carry ``id = "doc_NNN#slug"`` so the path
+        (== file-level doc id) is the right key. Legacy results put
+        the doc id directly in ``id``.
+        """
+        if "#" in result.id and result.path:
+            return result.path
+        return result.id
+
+    def _fetch_doc_as_result(
+        self, doc_id: str, *, score: float
+    ) -> SearchResult | None:
+        """Build a SearchResult for a graph-neighbour ``doc_id``.
+
+        Tries the file-level Chroma collection first; if the index is in
+        parent-doc mode the file id isn't stored there directly, so we
+        fall back to the first parent whose ``doc_id`` matches.
+        """
+        # File-level path: Chroma stores the doc directly under doc_id.
+        try:
+            raw = self._store._collection.get(  # noqa: SLF001 — internal use
+                ids=[doc_id], include=["metadatas", "documents"]
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.warning("graph fetch %s failed: %s", doc_id, e)
+            raw = {}
+        ids = raw.get("ids") or []
+        if ids:
+            md = (raw.get("metadatas") or [{}])[0] or {}
+            documents = raw.get("documents") or [""]
+            body = documents[0] if documents else ""
+            axes = {
+                k.removeprefix("axis_"): v
+                for k, v in md.items()
+                if k.startswith("axis_") and not k.endswith("_norm")
+            }
+            refs = [r for r in (md.get("refs") or "").split(",") if r]
+            return SearchResult(
+                id=doc_id,
+                title=str(md.get("title", "")),
+                score=score,
+                axes=axes,
+                body_snippet=_snippet(body),
+                path=str(md.get("path", "")),
+                refs=refs,
+                body_full=body if body else "",
+                metadata=dict(md),
+            )
+
+        # Parent-doc fallback: pick the first parent for this doc.
+        for parent in self._store.parents.values():
+            if parent.doc_id == doc_id:
+                return self._parent_to_result(parent, score)
+        logger.debug("graph neighbour %s not found in vector store", doc_id)
+        return None
 
 
 def _main(argv: list[str]) -> int:

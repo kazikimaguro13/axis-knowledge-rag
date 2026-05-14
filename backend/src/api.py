@@ -5,7 +5,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from importlib.metadata import PackageNotFoundError, version
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.src.config import (
@@ -19,6 +19,7 @@ from backend.src.conversation import (
     configure_default_store,
 )
 from backend.src.embedder import Embedder
+from backend.src.graph import KnowledgeGraph, build_default_graph
 from backend.src.normalizer import Normalizer
 from backend.src.rag import RAGPipeline
 from backend.src.schemas import (
@@ -30,7 +31,12 @@ from backend.src.schemas import (
     ChatMessagePayload,
     ChatRequest,
     ChatResponseModel,
+    GraphEdgeModel,
+    GraphNodeModel,
+    GraphResponse,
+    GraphStats,
     HealthResponse,
+    NeighborResponse,
     SearchRequest,
     SearchResponse,
     SearchResultPayload,
@@ -62,12 +68,21 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         parent_doc_enabled = False
     else:
         parent_doc_enabled = pd.enabled
+    graph: KnowledgeGraph | None = None
+    if app_cfg.graph.enabled:
+        try:
+            graph = build_default_graph(app_cfg.graph.knowledge_dir)
+            logger.info("knowledge graph stats: %s", graph.stats())
+        except Exception as e:  # noqa: BLE001
+            logger.warning("failed to build knowledge graph: %s — disabling /api/graph", e)
+            graph = None
     engine = SearchEngine(
         store,
         embedder,
         normalizer,
         parent_doc_enabled=parent_doc_enabled,
         top_k_children=pd.top_k_children,
+        graph=graph,
     )
     rag = RAGPipeline(engine, context_max_chars=app_cfg.rag.context_max_chars)
     chat_store = ConversationStore(
@@ -81,6 +96,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     _state["axes_cfg"] = load_axes_config()
     _state["chat_store"] = chat_store
     _state["chat_cfg"] = app_cfg.chat
+    _state["graph"] = graph
+    _state["graph_cfg"] = app_cfg.graph
     yield
     _state.clear()
 
@@ -145,8 +162,19 @@ async def get_axes() -> AxesResponse:
 @app.post("/api/search", response_model=SearchResponse)
 async def search(req: SearchRequest) -> SearchResponse:
     engine: SearchEngine = _state["engine"]
+    graph_cfg = _state.get("graph_cfg")
+    # config-level default (expand_on_search) is OR'd with the request flag,
+    # so admins can flip the default without touching callers.
+    do_expand = req.graph_expand or bool(graph_cfg and graph_cfg.expand_on_search)
     try:
-        results = engine.search(req.query, filters=req.filters or None, top_k=req.top_k)
+        results = engine.search(
+            req.query,
+            filters=req.filters or None,
+            top_k=req.top_k,
+            graph_expand=do_expand,
+            graph_hop=req.graph_hop,
+            graph_max_neighbors=req.graph_max_neighbors,
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
     return SearchResponse(results=[_to_payload(r) for r in results])
@@ -238,3 +266,70 @@ async def delete_chat(session_id: str) -> None:
     store: ConversationStore = _state["chat_store"]
     if not store.delete(session_id):
         raise HTTPException(status_code=404, detail="session not found")
+
+
+# ---------------------------------------------------------------------------
+# spec_040: /api/graph — refs-driven knowledge graph
+# ---------------------------------------------------------------------------
+
+
+def _require_graph() -> KnowledgeGraph:
+    graph = _state.get("graph")
+    if graph is None:
+        raise HTTPException(
+            status_code=503,
+            detail="knowledge graph is disabled (config.yml graph.enabled=false)",
+        )
+    return graph
+
+
+@app.get("/api/graph", response_model=GraphResponse)
+async def get_graph(
+    limit: int = Query(500, ge=1, le=2000),
+    offset: int = Query(0, ge=0),
+    axes_category: str | None = Query(None),
+    axes_level: str | None = Query(None),
+) -> GraphResponse:
+    graph = _require_graph()
+    nodes = graph.get_all_nodes(limit=limit, offset=offset)
+    if axes_category:
+        nodes = [n for n in nodes if str(n.axes.get("category", "")) == axes_category]
+    if axes_level:
+        nodes = [n for n in nodes if str(n.axes.get("level", "")) == axes_level]
+    node_ids = {n.doc_id for n in nodes}
+    edges = [
+        e
+        for e in graph.get_all_edges()
+        if e.source in node_ids and e.target in node_ids
+    ]
+    stats_dict = graph.stats()
+    return GraphResponse(
+        nodes=[GraphNodeModel.from_node(n) for n in nodes],
+        edges=[GraphEdgeModel(source=e.source, target=e.target) for e in edges],
+        stats=GraphStats(**stats_dict),
+    )
+
+
+@app.get("/api/graph/{doc_id}/neighbors", response_model=NeighborResponse)
+async def get_neighbors(
+    doc_id: str,
+    hop: int = Query(1, ge=1, le=3),
+    max_neighbors: int = Query(20, ge=1, le=100),
+) -> NeighborResponse:
+    graph = _require_graph()
+    node = graph.get_node(doc_id)
+    if node is None:
+        raise HTTPException(status_code=404, detail=f"doc_id {doc_id} not in graph")
+    neighbour_ids = graph.neighbors_within_hop(
+        doc_id, hop=hop, max_neighbors=max_neighbors
+    )
+    neighbours: list[GraphNodeModel] = []
+    for nid in neighbour_ids:
+        n = graph.get_node(nid)
+        if n is not None:
+            neighbours.append(GraphNodeModel.from_node(n))
+    return NeighborResponse(
+        center=GraphNodeModel.from_node(node),
+        neighbors=neighbours,
+        hop=hop,
+    )

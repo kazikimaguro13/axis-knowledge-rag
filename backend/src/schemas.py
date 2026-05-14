@@ -27,6 +27,14 @@ class SearchRequest(BaseModel):
     query: str | None = Field(default=None, description="Natural-language query")
     filters: dict[str, str | int] = Field(default_factory=dict)
     top_k: int = Field(default=5, ge=1, le=50)
+    # spec_040: opt-in 1-hop graph expansion. Defaults to False so the
+    # existing /api/search contract is preserved exactly.
+    graph_expand: bool = Field(
+        default=False,
+        description="If true, merge 1-hop refs-graph neighbours of the top hits.",
+    )
+    graph_hop: int = Field(default=1, ge=1, le=3)
+    graph_max_neighbors: int = Field(default=10, ge=1, le=50)
 
 
 class SearchResultPayload(BaseModel):
@@ -95,3 +103,51 @@ class ChatMessagePayload(BaseModel):
 class ChatHistoryResponse(BaseModel):
     session_id: str
     messages: list[ChatMessagePayload]
+
+
+# ---------------------------------------------------------------------------
+# spec_040: knowledge graph
+# ---------------------------------------------------------------------------
+
+
+class GraphNodeModel(BaseModel):
+    id: str
+    title: str
+    axes: dict[str, str | int] = Field(default_factory=dict)
+    in_degree: int = 0
+    out_degree: int = 0
+
+    @classmethod
+    def from_node(cls, node) -> "GraphNodeModel":  # type: ignore[no-untyped-def]
+        axes = {k: v for k, v in (node.axes or {}).items() if isinstance(v, (str, int))}
+        return cls(
+            id=node.doc_id,
+            title=node.title,
+            axes=axes,
+            in_degree=node.in_degree,
+            out_degree=node.out_degree,
+        )
+
+
+class GraphEdgeModel(BaseModel):
+    source: str
+    target: str
+
+
+class GraphStats(BaseModel):
+    nodes: int
+    edges: int
+    isolated: int
+    weakly_connected_components: int
+
+
+class GraphResponse(BaseModel):
+    nodes: list[GraphNodeModel]
+    edges: list[GraphEdgeModel]
+    stats: GraphStats
+
+
+class NeighborResponse(BaseModel):
+    center: GraphNodeModel
+    neighbors: list[GraphNodeModel]
+    hop: int

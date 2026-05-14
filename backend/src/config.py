@@ -115,13 +115,36 @@ class ChatConfig:
     rewriter: ChatRewriterConfig = field(default_factory=ChatRewriterConfig)
 
 
+# ---------------------------------------------------------------------------
+# spec_040: knowledge graph (refs-driven) settings
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class GraphConfig:
+    """Settings for the refs-driven knowledge graph layer (spec_040).
+
+    The graph is opt-in for retrieval expansion (default ``expand_on_search``
+    is False) so existing search behaviour is unchanged unless callers
+    explicitly request it. The /api/graph endpoints + 3D visualization
+    are gated by ``enabled``.
+    """
+
+    enabled: bool = True
+    default_hop: int = 1
+    max_neighbors_per_query: int = 20
+    expand_on_search: bool = False
+    knowledge_dir: str = "./examples/knowledge"
+
+
 @dataclass(frozen=True)
 class AppConfig:
-    """Aggregated runtime config (axes + retrieval + rag + chat)."""
+    """Aggregated runtime config (axes + retrieval + rag + chat + graph)."""
 
     retrieval: RetrievalConfig = field(default_factory=RetrievalConfig)
     rag: RAGConfig = field(default_factory=RAGConfig)
     chat: ChatConfig = field(default_factory=ChatConfig)
+    graph: GraphConfig = field(default_factory=GraphConfig)
 
 
 def load_app_config(path: Path | None = None) -> AppConfig:
@@ -147,6 +170,7 @@ def load_app_config(path: Path | None = None) -> AppConfig:
     rag_raw = (raw.get("rag") or {}) if isinstance(raw, dict) else {}
     chat_raw = (raw.get("chat") or {}) if isinstance(raw, dict) else {}
     rew_raw = (chat_raw.get("rewriter") or {}) if isinstance(chat_raw, dict) else {}
+    graph_raw = (raw.get("graph") or {}) if isinstance(raw, dict) else {}
 
     pd = ParentDocConfig(
         enabled=bool(pd_raw.get("enabled", ParentDocConfig.enabled)),
@@ -177,8 +201,22 @@ def load_app_config(path: Path | None = None) -> AppConfig:
         max_sessions=int(chat_raw.get("max_sessions", ChatConfig.max_sessions)),
         rewriter=rewriter,
     )
+    graph = GraphConfig(
+        enabled=bool(graph_raw.get("enabled", GraphConfig.enabled)),
+        default_hop=int(graph_raw.get("default_hop", GraphConfig.default_hop)),
+        max_neighbors_per_query=int(
+            graph_raw.get(
+                "max_neighbors_per_query", GraphConfig.max_neighbors_per_query
+            )
+        ),
+        expand_on_search=bool(
+            graph_raw.get("expand_on_search", GraphConfig.expand_on_search)
+        ),
+        knowledge_dir=str(graph_raw.get("knowledge_dir", GraphConfig.knowledge_dir)),
+    )
     return AppConfig(
         retrieval=RetrievalConfig(parent_doc=pd, time_decay=td),
         rag=rag,
         chat=chat,
+        graph=graph,
     )

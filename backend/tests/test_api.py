@@ -117,3 +117,51 @@ def test_chat_validation_rejects_empty_question() -> None:
     with TestClient(app) as client:
         resp = client.post("/api/chat", json={"question": ""})
         assert resp.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# spec_040: /api/graph + /api/graph/{id}/neighbors
+# ---------------------------------------------------------------------------
+
+
+def test_get_graph_returns_nodes_and_edges() -> None:
+    with TestClient(app) as client:
+        resp = client.get("/api/graph")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert "nodes" in body
+        assert "edges" in body
+        assert "stats" in body
+        assert isinstance(body["nodes"], list)
+        assert isinstance(body["edges"], list)
+        assert {"nodes", "edges", "isolated", "weakly_connected_components"} <= set(
+            body["stats"]
+        )
+
+
+def test_get_graph_filter_by_category() -> None:
+    with TestClient(app) as client:
+        full = client.get("/api/graph").json()
+        filtered = client.get("/api/graph?axes_category=技術記事").json()
+        assert len(filtered["nodes"]) <= len(full["nodes"])
+        for n in filtered["nodes"]:
+            assert str(n["axes"].get("category", "")) == "技術記事"
+
+
+def test_get_neighbors_known_doc() -> None:
+    """doc_001 in examples/knowledge is referenced by doc_002 and doc_004."""
+    with TestClient(app) as client:
+        resp = client.get("/api/graph/doc_001/neighbors?hop=1&max_neighbors=10")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["center"]["id"] == "doc_001"
+        assert isinstance(body["neighbors"], list)
+        # Direction defaults to "both", so doc_001 picks up its incoming refs.
+        ids = {n["id"] for n in body["neighbors"]}
+        assert ids  # at least one neighbour from the example corpus
+
+
+def test_get_neighbors_unknown_doc_returns_404() -> None:
+    with TestClient(app) as client:
+        resp = client.get("/api/graph/does_not_exist_doc/neighbors")
+        assert resp.status_code == 404
