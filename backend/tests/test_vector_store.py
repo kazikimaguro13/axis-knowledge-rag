@@ -143,3 +143,102 @@ def test_list_and_count_with_filter_by_axis(
     assert in_memory_store.count_with_filter(where) == 1
     page = in_memory_store.list_with_filter(where=where, limit=10, offset=0)
     assert page["ids"] == ["d_a"]
+
+
+# ---------------------------------------------------------------------------
+# spec_031: parent-document retrieval (add_chunks / query_with_parents)
+# ---------------------------------------------------------------------------
+
+
+def test_add_chunks_persists_parents_and_embeds_children(
+    tmp_path: Path, dummy_embedder: Embedder
+) -> None:
+    from backend.src.chunker import chunk_markdown
+
+    store = VectorStore(path=tmp_path / "chroma")
+    body = (
+        "## Alpha\n\nFirst paragraph.\n\n## Beta\n\nSecond paragraph.\n\n"
+        "Another sentence in beta.\n"
+    )
+    parents, children = chunk_markdown(
+        "kb/sample.md", body, {"title": "Sample"}, max_child_tokens=64
+    )
+    embeddings = dummy_embedder.embed_batch([c.text for c in children])
+    store.add_chunks(parents, children, embeddings)
+
+    assert store.count() == len(children)
+    assert (tmp_path / "chroma" / "parents.json").exists()
+
+
+def test_query_with_parents_groups_children_to_top_n(
+    tmp_path: Path, dummy_embedder: Embedder
+) -> None:
+    from backend.src.chunker import chunk_markdown
+
+    store = VectorStore(path=tmp_path / "chroma")
+    parents_all: list = []
+    children_all: list = []
+    for i, body in enumerate([
+        "## Alpha\n\nfirst body of alpha doc.\n",
+        "## Beta\n\nsecond body of beta doc.\n",
+        "## Gamma\n\nthird body of gamma doc.\n",
+    ]):
+        ps, cs = chunk_markdown(f"kb/{i}.md", body, {"title": f"D{i}"})
+        parents_all.extend(ps)
+        children_all.extend(cs)
+    embeddings = dummy_embedder.embed_batch([c.text for c in children_all])
+    store.add_chunks(parents_all, children_all, embeddings)
+
+    q = dummy_embedder.embed("first body of alpha doc.")
+    results = store.query_with_parents(q, top_k_children=10, top_n_parents=2)
+    assert len(results) == 2
+    for parent, score in results:
+        assert parent.parent_id.startswith("kb/")
+        assert 0.0 <= score <= 1.0
+
+
+def test_load_parents_reads_sidecar(tmp_path: Path, dummy_embedder: Embedder) -> None:
+    from backend.src.chunker import chunk_markdown
+
+    db_dir = tmp_path / "chroma"
+    store = VectorStore(path=db_dir)
+    parents, children = chunk_markdown(
+        "kb/x.md", "## H\n\nbody.", {"title": "X"}
+    )
+    embeddings = dummy_embedder.embed_batch([c.text for c in children])
+    store.add_chunks(parents, children, embeddings)
+
+    # Re-open: the in-memory parents dict starts empty, load from sidecar.
+    fresh = VectorStore(path=db_dir)
+    assert fresh.parents == {}
+    assert fresh.has_parents() is True  # sidecar exists
+    n = fresh.load_parents()
+    assert n == 1
+    assert next(iter(fresh.parents.values())).title == "H"
+
+
+def test_add_chunks_length_mismatch_raises(
+    tmp_path: Path, dummy_embedder: Embedder
+) -> None:
+    from backend.src.chunker import chunk_markdown
+
+    store = VectorStore(path=tmp_path / "chroma")
+    parents, children = chunk_markdown("kb/d.md", "## A\n\nbody.", {})
+    with pytest.raises(ValueError):
+        store.add_chunks(parents, children, [])
+
+
+def test_reset_clears_parents_sidecar(
+    tmp_path: Path, dummy_embedder: Embedder
+) -> None:
+    from backend.src.chunker import chunk_markdown
+
+    db_dir = tmp_path / "chroma"
+    store = VectorStore(path=db_dir)
+    parents, children = chunk_markdown("kb/r.md", "## R\n\nbody.", {})
+    embeddings = dummy_embedder.embed_batch([c.text for c in children])
+    store.add_chunks(parents, children, embeddings)
+    assert (db_dir / "parents.json").exists()
+    store.reset()
+    assert not (db_dir / "parents.json").exists()
+    assert store.parents == {}

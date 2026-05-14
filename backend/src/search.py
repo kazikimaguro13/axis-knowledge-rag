@@ -2,6 +2,13 @@
 
 Combines axis filtering (exact match on metadata) with vector similarity
 (cosine on embeddings). The unique selling point of axis-knowledge-rag.
+
+spec_031 adds the *parent-document* retrieval path: when
+``parent_doc_enabled=True`` the engine searches over child sub-chunks,
+deduplicates by ``parent_id`` and surfaces the H2 parent section as the
+result. BM25 fusion still scores at the document (file) level — for
+multi-parent documents we keep ``max(parent_score)`` so the best-matching
+section dominates.
 """
 
 import logging
@@ -9,6 +16,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from backend.src.bm25_index import BM25Index
+from backend.src.chunker import ParentChunk
 from backend.src.embedder import Embedder
 from backend.src.normalizer import Normalizer
 from backend.src.vector_store import VectorStore
@@ -25,6 +33,10 @@ class SearchResult:
     body_snippet: str
     path: str
     refs: list[str] = field(default_factory=list)
+    # spec_031: full parent body for RAG context construction. Empty in the
+    # legacy file-level path (where ``body_snippet`` is already the whole
+    # body, just truncated to 200 chars). Populated only by parent-doc mode.
+    body_full: str = ""
 
 
 def _build_where(filters: dict[str, Any]) -> dict[str, Any] | None:
@@ -101,11 +113,27 @@ class SearchEngine:
         embedder: Embedder,
         normalizer: Normalizer | None = None,
         bm25_index: BM25Index | None = None,
+        *,
+        parent_doc_enabled: bool = False,
+        top_k_children: int = 20,
     ) -> None:
         self._store = store
         self._embedder = embedder
         self._normalizer = normalizer or Normalizer()
         self._bm25_index = bm25_index
+        self._parent_doc_enabled = parent_doc_enabled
+        self._top_k_children = top_k_children
+        if parent_doc_enabled and not store.parents:
+            # Try lazy-load from sidecar so callers can build the engine
+            # without remembering the load step.
+            try:
+                store.load_parents()
+            except Exception as e:  # noqa: BLE001
+                logger.warning("Failed to lazy-load parents.json: %s", e)
+
+    @property
+    def parent_doc_enabled(self) -> bool:
+        return self._parent_doc_enabled
 
     def search(
         self,
@@ -137,12 +165,16 @@ class SearchEngine:
             else None
         )
         where = _build_where_norm(norm_filters or {})
-
         use_bm25 = (
             query is not None
             and self._bm25_index is not None
             and bm25_weight > 0.0
         )
+
+        if self._parent_doc_enabled:
+            return self._search_parent_doc(
+                query, where=where, top_k=top_k, bm25_weight=bm25_weight
+            )
 
         if query is None:
             # Axis-only path: use a zero embedding (Chroma will then sort by
@@ -190,6 +222,103 @@ class SearchEngine:
         )
         return results
 
+    # -----------------------------------------------------------------
+    # spec_031: parent-document retrieval path
+    # -----------------------------------------------------------------
+
+    def _search_parent_doc(
+        self,
+        query: str | None,
+        *,
+        where: dict[str, Any] | None,
+        top_k: int,
+        bm25_weight: float,
+    ) -> list[SearchResult]:
+        """Child-level vector search → group by parent → optional BM25 fusion."""
+        use_bm25 = (
+            query is not None
+            and self._bm25_index is not None
+            and bm25_weight > 0.0
+        )
+
+        if query is None:
+            # Axis-only: zero embedding, rely on the filter. top_k_children
+            # is already a soft cap on the parent dedup pool.
+            embedding = [0.0] * 768
+            n_children = max(self._top_k_children, top_k)
+        else:
+            q_norm = self._normalizer(query)
+            embedding = self._embedder.embed(q_norm)
+            # Over-fetch children so BM25 / parent dedup has enough candidates.
+            n_children = max(self._top_k_children, top_k * 4)
+
+        # Pull *more* parents than top_k when fusing — BM25 may reorder.
+        parent_pool = max(top_k * 2, top_k + 5) if use_bm25 else top_k
+        ranked_parents = self._store.query_with_parents(
+            embedding,
+            top_k_children=n_children,
+            top_n_parents=parent_pool,
+            where=where,
+        )
+        results = [self._parent_to_result(p, score) for p, score in ranked_parents]
+
+        if use_bm25:
+            assert query is not None and self._bm25_index is not None
+            bm25_scores = self._bm25_index.score(query)
+            fused: list[SearchResult] = []
+            for r in results:
+                # BM25 is keyed by file-level doc_id (the chunker's doc_id).
+                bm25 = bm25_scores.get(r.path, 0.0)
+                if bm25 == 0.0:
+                    bm25 = bm25_scores.get(r.id.split("#", 1)[0], 0.0)
+                final = (1.0 - bm25_weight) * r.score + bm25_weight * bm25
+                fused.append(
+                    SearchResult(
+                        id=r.id,
+                        title=r.title,
+                        score=final,
+                        axes=r.axes,
+                        body_snippet=r.body_snippet,
+                        path=r.path,
+                        refs=r.refs,
+                        body_full=r.body_full,
+                    )
+                )
+            # Collapse multiple parents from the same doc — keep best score.
+            by_doc: dict[str, SearchResult] = {}
+            for r in sorted(fused, key=lambda x: x.score, reverse=True):
+                if r.path not in by_doc:
+                    by_doc[r.path] = r
+            results = sorted(by_doc.values(), key=lambda r: r.score, reverse=True)[:top_k]
+        else:
+            results = results[:top_k]
+
+        logger.info(
+            "search[parent_doc](query=%r, bm25_weight=%.2f) -> %d parents",
+            query,
+            bm25_weight,
+            len(results),
+        )
+        return results
+
+    def _parent_to_result(self, parent: ParentChunk, score: float) -> SearchResult:
+        meta = parent.metadata or {}
+        axes_raw = meta.get("axes") or {}
+        axes = dict(axes_raw) if isinstance(axes_raw, dict) else {}
+        refs = meta.get("refs") or []
+        if not isinstance(refs, list):
+            refs = []
+        return SearchResult(
+            id=parent.parent_id,
+            title=parent.title,
+            score=score,
+            axes=axes,
+            body_snippet=_snippet(parent.text),
+            path=parent.doc_id,
+            refs=list(refs),
+            body_full=parent.text,
+        )
+
 
 def _main(argv: list[str]) -> int:
     """CLI:
@@ -197,7 +326,12 @@ def _main(argv: list[str]) -> int:
     """
     import argparse
 
-    from backend.src.config import configure_logging, load_axes_config, settings
+    from backend.src.config import (
+        configure_logging,
+        load_app_config,
+        load_axes_config,
+        settings,
+    )
 
     configure_logging()
     p = argparse.ArgumentParser()
@@ -229,7 +363,16 @@ def _main(argv: list[str]) -> int:
     store = VectorStore(path=Path(args.db_path))
     embedder = Embedder()
     normalizer = Normalizer.from_config(load_axes_config())
-    engine = SearchEngine(store, embedder, normalizer)
+    app_cfg = load_app_config()
+    pd = app_cfg.retrieval.parent_doc
+    parent_doc_enabled = pd.enabled and store.has_parents()
+    engine = SearchEngine(
+        store,
+        embedder,
+        normalizer,
+        parent_doc_enabled=parent_doc_enabled,
+        top_k_children=pd.top_k_children,
+    )
     results = engine.search(
         args.query,
         filters=filters,

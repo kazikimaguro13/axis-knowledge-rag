@@ -205,3 +205,101 @@ def test_search_axis_only_ignores_bm25(
     results = fused.search(None, filters={"category": "メモ"}, top_k=5, bm25_weight=1.0)
     assert len(results) == 1
     assert results[0].id == "meeting"
+
+
+# ---------------------------------------------------------------------------
+# spec_031: Parent-document retrieval mode
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def parent_doc_engine(
+    in_memory_store: VectorStore, dummy_embedder: Embedder
+) -> SearchEngine:
+    """Build a search engine seeded with chunked Markdown (parent-doc path)."""
+    from backend.src.chunker import chunk_markdown
+
+    docs_md = [
+        ("doc_alpha", "## RAG とは\n\nRAGは検索拡張生成です。\n\n## 設計\n\n設計判断を述べます。\n"),
+        ("doc_beta",  "## ベクトル検索\n\nコサイン類似度を使います。\n"),
+        ("doc_gamma", "## メモ\n\n会議メモ。\n"),
+    ]
+    parents_all = []
+    children_all = []
+    for doc_id, body in docs_md:
+        ps, cs = chunk_markdown(doc_id, body, {"title": doc_id})
+        parents_all.extend(ps)
+        children_all.extend(cs)
+    embeddings = dummy_embedder.embed_batch([c.text for c in children_all])
+    in_memory_store.add_chunks(parents_all, children_all, embeddings)
+    return SearchEngine(
+        in_memory_store, dummy_embedder, parent_doc_enabled=True
+    )
+
+
+def test_parent_doc_search_returns_parent_results(parent_doc_engine: SearchEngine) -> None:
+    results = parent_doc_engine.search("RAG", top_k=3)
+    assert results
+    for r in results:
+        # parent_id format: "{doc_id}#{slug}"
+        assert "#" in r.id
+        assert r.body_full  # parent text is populated for RAG context
+        assert r.body_snippet  # snippet is also populated for UI
+
+
+def test_parent_doc_search_dedup_by_parent(parent_doc_engine: SearchEngine) -> None:
+    """Each result's parent_id must be unique (no duplicates)."""
+    results = parent_doc_engine.search("RAG", top_k=10)
+    ids = [r.id for r in results]
+    assert len(ids) == len(set(ids))
+
+
+def test_parent_doc_axis_only_path(parent_doc_engine: SearchEngine) -> None:
+    """Axis-only query must still work in parent-doc mode."""
+    results = parent_doc_engine.search(None, top_k=10)
+    assert results  # at least one parent comes back
+    for r in results:
+        assert r.body_full
+
+
+def test_parent_doc_engine_property_exposed(
+    in_memory_store: VectorStore, dummy_embedder: Embedder
+) -> None:
+    legacy = SearchEngine(in_memory_store, dummy_embedder)
+    assert legacy.parent_doc_enabled is False
+    pdoc = SearchEngine(in_memory_store, dummy_embedder, parent_doc_enabled=True)
+    assert pdoc.parent_doc_enabled is True
+
+
+def test_parent_doc_with_bm25_fusion_collapses_per_doc(
+    in_memory_store: VectorStore, dummy_embedder: Embedder
+) -> None:
+    """BM25 + parent_doc: multiple parents from one doc collapse to single best."""
+    from backend.src.chunker import chunk_markdown
+
+    docs_md = [
+        ("doc_alpha",
+         "## RAG とは\n\nrag についての説明。\n\n## 設計\n\n設計判断の話。\n"),
+        ("doc_beta",
+         "## ベクトル検索\n\nコサイン類似度の話。\n"),
+    ]
+    parents_all = []
+    children_all = []
+    for doc_id, body in docs_md:
+        ps, cs = chunk_markdown(doc_id, body, {"title": doc_id})
+        parents_all.extend(ps)
+        children_all.extend(cs)
+    embeddings = dummy_embedder.embed_batch([c.text for c in children_all])
+    in_memory_store.add_chunks(parents_all, children_all, embeddings)
+
+    bm25 = BM25Index.build(
+        [(p.doc_id, normalize_text(p.text)) for p in parents_all], Normalizer()
+    )
+    engine = SearchEngine(
+        in_memory_store, dummy_embedder, Normalizer(),
+        bm25_index=bm25, parent_doc_enabled=True,
+    )
+    results = engine.search("rag", top_k=5, bm25_weight=0.5)
+    paths = [r.path for r in results]
+    # Each file should appear at most once after collapse
+    assert len(paths) == len(set(paths))

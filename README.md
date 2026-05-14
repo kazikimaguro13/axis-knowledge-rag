@@ -21,6 +21,7 @@ YAML frontmatter 付き Markdown ナレッジに対する、**軸メタデータ
 ## ✨ 特徴
 
 - 🎯 **軸メタデータ + ベクトル検索の hybrid** — `category` / `topic` / `level` などの構造化軸で絞り込みつつ、自然文クエリで意味検索
+- 🧩 **Parent Document Retrieval (Small-to-Big)** — 検索は H2 配下の小チャンク粒度、回答は H2 セクション全文を LLM に渡すので精度と文脈を両立 (v0.7, [ADR-017](docs/adr/ADR-017-parent-document-retrieval.md))
 - 🇯🇵 **日本語ナレッジ特化** — 表記ゆれ吸収 (NFKC + カナ統一 + lowercase) 標準搭載
 - 🔌 **LangChain / LlamaIndex 不使用、自前実装** — 依存が薄く、内部挙動が読める。Embedder / VectorStore / RAG Pipeline を必要最小限の薄いラッパで構成
 - 🏠 **Local-first 設計** — ChromaDB はローカル永続、API キー未設定でも DUMMY モードで動作確認可能。個人ナレッジを外部送信しない

@@ -25,3 +25,19 @@ normalization:
 integrity:
   check_refs: true
   fail_on_broken: false
+
+# spec_031: Parent Document Retrieval (Small-to-Big).
+# When enabled, the index stores child sub-chunks (~256 tokens) and search
+# returns their parent H2 sections — better precision while still feeding
+# the LLM coherent context blocks. Set `enabled: false` to fall back to
+# the legacy file-level path.
+retrieval:
+  parent_doc:
+    enabled: true
+    chunk_strategy: h2          # currently only "h2" is implemented
+    max_child_tokens: 256
+    top_k_children: 20
+    top_n_parents: 5
+
+rag:
+  context_max_chars: 8000

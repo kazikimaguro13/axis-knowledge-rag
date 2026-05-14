@@ -88,3 +88,69 @@ def test_answer_with_category_filter(rag_pipeline: RAGPipeline) -> None:
     ans = rag_pipeline.answer("dummy question", filters={"category": "技術記事"}, top_k=10)
     for s in ans.sources:
         assert s.axes.get("category") == "技術記事"
+
+
+# ---------------------------------------------------------------------------
+# spec_031: build_context (parent-doc aware)
+# ---------------------------------------------------------------------------
+
+
+def test_build_context_uses_body_full_when_present() -> None:
+    from backend.src.rag import build_context
+    from backend.src.search import SearchResult
+
+    full = "Full parent text body that should appear in context."
+    r = SearchResult(
+        id="doc_001#alpha",
+        title="Alpha",
+        score=0.9,
+        axes={"category": "技術記事"},
+        body_snippet=full[:30],
+        path="doc_001",
+        refs=[],
+        body_full=full,
+    )
+    out = build_context([r], max_chars=8000)
+    assert full in out
+    assert "## 出典 1: [doc_001#alpha] Alpha" in out
+    assert "(file: doc_001)" in out
+
+
+def test_build_context_falls_back_to_snippet_when_no_body_full() -> None:
+    from backend.src.rag import build_context
+    from backend.src.search import SearchResult
+
+    r = SearchResult(
+        id="doc_001",
+        title="Legacy Doc",
+        score=0.9,
+        axes={},
+        body_snippet="Just a snippet.",
+        path="/tmp/doc_001.md",
+        refs=[],
+    )
+    out = build_context([r])
+    assert "Just a snippet." in out
+
+
+def test_build_context_respects_max_chars_budget() -> None:
+    from backend.src.rag import build_context
+    from backend.src.search import SearchResult
+
+    big_text = "x" * 5000
+    results = [
+        SearchResult(
+            id=f"d#{i}",
+            title=f"T{i}",
+            score=1.0,
+            axes={},
+            body_snippet="s",
+            path=f"d{i}",
+            refs=[],
+            body_full=big_text,
+        )
+        for i in range(5)
+    ]
+    out = build_context(results, max_chars=6000)
+    # Should fit at most one full block (~5000+header), the next should be dropped.
+    assert out.count("## 出典") == 1

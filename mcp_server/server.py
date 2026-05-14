@@ -18,7 +18,12 @@ from pathlib import Path
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
-from backend.src.config import configure_logging, load_axes_config, settings
+from backend.src.config import (
+    configure_logging,
+    load_app_config,
+    load_axes_config,
+    settings,
+)
 from backend.src.embedder import Embedder
 from backend.src.integrity import IntegrityChecker
 from backend.src.loader import load_directory
@@ -78,15 +83,39 @@ def _get_engine() -> SearchEngine:
         store = VectorStore(path=settings.chroma_db_path)
         embedder = Embedder()
         normalizer = Normalizer.from_config(load_axes_config())
-        _engine = SearchEngine(store, embedder, normalizer)
-        logger.info("SearchEngine ready (embedder_mode=%s)", "DUMMY" if embedder.is_dummy else "GEMINI")
+        app_cfg = load_app_config()
+        pd = app_cfg.retrieval.parent_doc
+        if pd.enabled and not store.has_parents():
+            logger.warning(
+                "parent_doc.enabled=true but parents.json is missing — "
+                "falling back to legacy search. Run "
+                "`python -m scripts.build_index <dir> --rebuild --mode parent_doc`."
+            )
+            parent_doc_enabled = False
+        else:
+            parent_doc_enabled = pd.enabled
+        _engine = SearchEngine(
+            store,
+            embedder,
+            normalizer,
+            parent_doc_enabled=parent_doc_enabled,
+            top_k_children=pd.top_k_children,
+        )
+        logger.info(
+            "SearchEngine ready (embedder_mode=%s, parent_doc=%s)",
+            "DUMMY" if embedder.is_dummy else "GEMINI",
+            parent_doc_enabled,
+        )
     return _engine
 
 
 def _get_rag() -> RAGPipeline:
     global _rag
     if _rag is None:
-        _rag = RAGPipeline(_get_engine())
+        app_cfg = load_app_config()
+        _rag = RAGPipeline(
+            _get_engine(), context_max_chars=app_cfg.rag.context_max_chars
+        )
         logger.info("RAGPipeline ready (rag_mode=%s)", "DUMMY" if _rag.is_dummy else "CLAUDE")
     return _rag
 

@@ -73,7 +73,7 @@ flowchart LR
 
 ### 3-1. Index time (ナレッジ取り込み)
 
-`scripts/build_index.py <dir> [--reset] [--strict-integrity]` の流れ:
+`scripts/build_index.py <dir> [--rebuild] [--mode auto|legacy|parent_doc]` の流れ:
 
 ```
 1. load_directory(dir) ──► list[Document]            (loader.py)
@@ -81,10 +81,36 @@ flowchart LR
 3. IntegrityChecker().check(docs)                   (integrity.py)
        └─ broken_refs / orphans / cycles を集計
        └─ --strict-integrity なら broken_refs 検出時に exit 1
-4. embedder.embed_batch([d.normalized_body for d in docs])
-       └─ Gemini API or DUMMY fallback             (embedder.py)
-5. vector_store.upsert_many(docs, embeddings)
-       └─ axis_* と axis_*_norm を metadata に flatten (vector_store.py)
+4-A. mode=parent_doc (v0.7 default, ADR-017):
+       chunker.chunk_markdown(d.id, d.body, fm)
+         └─ list[ParentChunk] (H2 単位) + list[ChildChunk] (~256 token 小ブロック)
+       embedder.embed_batch([c.text for c in children])
+       vector_store.add_chunks(parents, children, embeddings)
+         └─ children を ChromaDB に upsert (parent_id を metadata に持つ)
+         └─ parents を data/parents.json に sidecar 保存
+4-B. mode=legacy (v0.6 互換):
+       embedder.embed_batch([d.normalized_body for d in docs])
+       vector_store.upsert_many(docs, embeddings)
+         └─ axis_* と axis_*_norm を metadata に flatten
+```
+
+### 3-1-bis. Parent Document Retrieval の構造 (spec_031)
+
+```
+.md ファイル (1 つ)
+  ├─ frontmatter (axes / tags / refs / id / title)
+  └─ body
+       ├─ ## Section A   ─►  ParentChunk(parent_id="doc_001#section-a", text=section A 全文)
+       │     ├─ paragraph 1   ─► ChildChunk(child_id="doc_001#section-a#c000", embedded)
+       │     └─ paragraph 2   ─► ChildChunk(child_id="doc_001#section-a#c001", embedded)
+       └─ ## Section B   ─►  ParentChunk(parent_id="doc_001#section-b", text=section B 全文)
+             └─ paragraph 1   ─► ChildChunk(child_id="doc_001#section-b#c000", embedded)
+
+検索時:
+  query → embed → ChromaDB.query(top_k_children=20)
+              → metadata の parent_id で dedup
+              → 最良スコア child を持つ parent を top_n_parents=5 返す
+              → LLM へは parent.text を build_context() で連結 (max_chars=8000)
 ```
 
 ### 3-2. Query time (検索 + 回答) — v0.3 FastAPI フロー
@@ -142,9 +168,10 @@ existing .md ──► extract_blocks() ──► [既存ブロック群]
 | `backend/src/normalizer.py` | NFKC + カナ統一 + lowercase | 標準ライブラリのみ (`unicodedata`) | 冪等 (`f(f(x)) == f(x)`) |
 | `backend/src/integrity.py` | refs / orphans / cycles 検出 | `loader.Document` | 純粋関数的、副作用なし |
 | `backend/src/embedder.py` | テキスト→768 次元ベクトル変換 | `google-generativeai` | `GEMINI_API_KEY` 未設定なら DUMMY |
-| `backend/src/vector_store.py` | ChromaDB ラッパ (upsert / query / reset) | `chromadb`>=0.5 | axis 値は `axis_<key>` / `axis_<key>_norm` の 2 列で保持 |
-| `backend/src/search.py` | 軸フィルタ + ベクトル検索の hybrid | `embedder`, `vector_store`, `normalizer` | クエリも filter も normalize 経由で渡す |
-| `backend/src/rag.py` | Claude API 呼び出し + 出典 ID 抽出 | `anthropic`, `search` | `ANTHROPIC_API_KEY` 未設定なら DUMMY |
+| `backend/src/vector_store.py` | ChromaDB ラッパ (upsert / query / reset) + parent_doc sidecar (`parents.json`) | `chromadb`>=0.5 | axis 値は `axis_<key>` / `axis_<key>_norm` の 2 列で保持 |
+| `backend/src/chunker.py` | Markdown → ParentChunk (H2) + ChildChunk (~256 token) (spec_031) | 標準ライブラリのみ (`re` / `unicodedata`) | parent / child は 1:N で必ず整合、orphan child を作らない |
+| `backend/src/search.py` | 軸フィルタ + ベクトル検索の hybrid (parent_doc 経路あり) | `embedder`, `vector_store`, `normalizer`, `chunker` | クエリも filter も normalize 経由で渡す |
+| `backend/src/rag.py` | Claude API 呼び出し + 出典 ID 抽出 + `build_context()` (max_chars cap) | `anthropic`, `search` | `ANTHROPIC_API_KEY` 未設定なら DUMMY |
 | `backend/src/marker.py` | `<!-- AUTO_GENERATED_* -->` ブロック操作 | 標準ライブラリのみ (`re`) | START/END 名一致必須 (`validate_balance`) |
 | `backend/src/schemas.py` | FastAPI 用 Pydantic v2 スキーマ | `pydantic` | Request/Response 型を集中管理 |
 | `backend/src/api.py` | FastAPI エンドポイント + CORS + Lifespan | `fastapi`, `uvicorn` | Lifespan で SearchEngine/RAGPipeline を 1 回のみ初期化 |
