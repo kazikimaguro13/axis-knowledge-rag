@@ -38,6 +38,12 @@ dev = [
     "ruff>=0.5.0",
     "pytest-asyncio>=0.24.0",
 ]
+eval = [
+    "ragas>=0.2.0",
+    "datasets>=2.20",
+    "langchain-google-genai>=2.0",
+    "langchain-core>=0.3",
+]
 
 [project.scripts]
 axis-knowledge-rag-mcp = "mcp_server.server:main"
@@ -48,7 +54,7 @@ Repository = "https://github.com/kazikimaguro13/axis-knowledge-rag"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["backend*", "mcp_server*"]
+include = ["backend*", "mcp_server*", "evaluation*"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
