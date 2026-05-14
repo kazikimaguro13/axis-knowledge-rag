@@ -27,7 +27,8 @@ jobs:
       - name: Build index
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-        run: python scripts/build_index.py --rebuild
+        # spec_031 made knowledge_dir a required positional arg; pass it explicitly.
+        run: python scripts/build_index.py examples/knowledge --rebuild
 
       - name: Run A/B test
         env:
