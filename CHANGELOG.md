@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+### Day 37 (2026-05-14) — Parent Storage: JSON → SQLite migration (spec_037)
+
+v0.8 hardening。spec_031 で導入した `parents.json` を SQLite (`parents.db`) に置換し、
+起動時の全ロード遅延とフル書き直し I/O を解消する。既存ユーザーは何もしなくても初回起動で自動移行。
+
+- backend/src/parent_storage.py: **新規**。`ParentStorage` Protocol (runtime_checkable) + `SqliteParentStorage` (WAL mode、lazy SELECT per parent_id、`idx_parents_doc_id` index) + `JsonParentStorage` (v0.7 全ロード、backward compat 用) + `make_parent_storage()` factory (sqlite 優先、JSON 検出時は 1 回だけ自動 migrate + warning ログ)。stdlib `sqlite3` のみ、新規依存なし
+- backend/src/vector_store.py: `self._parents` dict (in-memory eager) を `self._parent_storage: ParentStorage` に置換。`__init__` に `storage: str = "sqlite"` パラメータを追加。`add_chunks()` → `_parent_storage.upsert_many()`、`query_with_parents()` → `_parent_storage.get_many(top_pids)` (batch lazy fetch)、`has_parents()` → `count() > 0`、`reset()` → `clear()`。`_persist_parents()` / `PARENTS_SIDECAR_FILENAME` / `PARENTS_SIDECAR_VERSION` を削除
+- scripts/build_index.py: `--migrate-parents-json` フラグ追加 (冪等、`parents.db` 既存なら skip)。`--parent-storage {sqlite,json}` フラグ追加 (config.yml を override)。`parents.json` 参照を `parents.db` に更新
+- backend/src/config.py: `ParentDocConfig` に `storage: str = "sqlite"` フィールドを追加。`load_app_config()` が `retrieval.parent_doc.storage` をパース
+- config.yml: `retrieval.parent_doc.storage: "sqlite"` を追加 (default)
+- backend/tests/test_parent_storage.py: **新規** 17 件 — `TestCommon` (sqlite & json パラメトライズ 7 件) + `TestSqliteSpecific` (persist_across_instances / wal_mode / index_on_doc_id 3 件) + `TestMigration` (auto_migrate / no_files / storage_json / existing_sqlite_skips / migrated_data_matches 5 件) 、さらに `TestCommon` は params=2 で 14 実行
+- backend/tests/test_vector_store.py: `parents.json` 参照を `parents.db` に更新 (2 箇所)、reset テストを `has_parents()` チェックに変更 (file 非存在チェックを削除)。SQLite パス専用テスト 3 件追加 (has_parents_true_after_add / load_parents_returns_correct_count / has_parents_false_after_reset)
+- docs/adr/ADR-023-parent-storage-sqlite.md: 新規 ADR。Context (全ロード遅延) / Decision (SQLite default + JSON fallback) / Alternatives (parquet・LMDB・JSON 維持 を却下) / Consequences (起動改善・VACUUM 未実装の Open question を記録)
+- docs/configuration.md: 新規。全 config.yml キーのリファレンス表 (retrieval.parent_doc.storage の移行ノートを含む)
+- 既存 291 tests に回帰なし、合計 **304+ tests pass**、ruff 緑
+
 ### Day 40 (2026-05-14) — GraphRAG + 3D Knowledge Graph (spec_040)
 
 v0.8 マーキー機能。YAML frontmatter の `refs:` フィールドを *初めて* 検索 / 可視化のソースとして活用する。
