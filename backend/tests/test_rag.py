@@ -133,6 +133,45 @@ def test_build_context_falls_back_to_snippet_when_no_body_full() -> None:
     assert "Just a snippet." in out
 
 
+# ---------------------------------------------------------------------------
+# spec_032: rag.chat() (conversational, dummy mode)
+# ---------------------------------------------------------------------------
+
+
+def test_chat_creates_session_and_persists_turn(rag_pipeline: RAGPipeline) -> None:
+    from backend.src.conversation import ConversationStore
+
+    store = ConversationStore()
+    resp = rag_pipeline.chat("dummy question", store=store)
+    assert resp.session_id
+    assert resp.is_dummy is True
+    # user + assistant persisted
+    hist = store.get_history(resp.session_id, last_n_turns=6)
+    assert len(hist) == 2
+    assert hist[0].role == "user"
+    assert hist[1].role == "assistant"
+
+
+def test_chat_reuses_session(rag_pipeline: RAGPipeline) -> None:
+    from backend.src.conversation import ConversationStore
+
+    store = ConversationStore()
+    r1 = rag_pipeline.chat("first", store=store)
+    r2 = rag_pipeline.chat("second", session_id=r1.session_id, store=store)
+    assert r2.session_id == r1.session_id
+    # 2 turns = 4 messages
+    assert len(store.get_history(r1.session_id, last_n_turns=6)) == 4
+
+
+def test_chat_no_rewrite_when_history_empty(rag_pipeline: RAGPipeline) -> None:
+    from backend.src.conversation import ConversationStore
+
+    store = ConversationStore()
+    resp = rag_pipeline.chat("first turn", store=store)
+    # No prior turns → rewriter returns original → rewritten_question=None
+    assert resp.rewritten_question is None
+
+
 def test_build_context_respects_max_chars_budget() -> None:
     from backend.src.rag import build_context
     from backend.src.search import SearchResult

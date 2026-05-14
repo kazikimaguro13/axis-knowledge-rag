@@ -11,7 +11,13 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from backend.src.config import load_app_config, settings
+from backend.src.conversation import (
+    ConversationStore,
+    Message,
+    get_default_store,
+)
 from backend.src.embedder import Embedder
+from backend.src.question_rewriter import rewrite_question
 from backend.src.search import SearchEngine, SearchResult
 from backend.src.vector_store import VectorStore
 
@@ -33,12 +39,46 @@ SYSTEM_PROMPT = """\
 簡潔で読みやすい日本語で答えてください。
 """
 
+CHAT_SYSTEM_PROMPT = """\
+あなたは社内ナレッジ検索アシスタントです。
+直近の会話履歴と、検索でヒットしたドキュメントを参考に、ユーザーの質問に答えてください。
+
+回答ルール:
+1. 答えは検索でヒットしたドキュメントに書かれた内容に忠実に
+2. 回答中で参照した Document は必ず `[doc_NNN]` 形式で本文中にマークしてください
+3. 履歴と矛盾する内容があった場合、履歴ではなくドキュメントに従う
+4. 履歴は文脈把握 (代名詞解決・話題継続) のためだけに使う
+5. 出典が無い場合は「提供された資料には記載がありません」と短く答える
+
+簡潔で読みやすい日本語で答えてください。
+"""
+
 CITATION_RE = re.compile(r"\[(doc_\d+)\]")
 
 
 @dataclass
 class Answer:
     text: str
+    sources: list[SearchResult] = field(default_factory=list)
+    cited_ids: list[str] = field(default_factory=list)
+    is_dummy: bool = False
+    model: str | None = None
+
+
+@dataclass
+class ChatResponse:
+    """Return type for ``RAGPipeline.chat()``.
+
+    ``rewritten_question`` is ``None`` when no rewrite happened (either the
+    rewriter was skipped, fell back on error, or the rewrite matched the
+    original verbatim) — that lets the UI display the rewrite badge only
+    when it carries information.
+    """
+
+    session_id: str
+    question: str
+    rewritten_question: str | None
+    answer: str
     sources: list[SearchResult] = field(default_factory=list)
     cited_ids: list[str] = field(default_factory=list)
     is_dummy: bool = False
@@ -174,6 +214,145 @@ class RAGPipeline:
             is_dummy=False,
             model=self._model,
         )
+
+    # ------------------------------------------------------------------
+    # spec_032: conversational RAG
+    # ------------------------------------------------------------------
+
+    def chat(
+        self,
+        question: str,
+        *,
+        session_id: str | None = None,
+        filters: dict[str, Any] | None = None,
+        top_k: int = 5,
+        max_tokens: int = 1024,
+        store: ConversationStore | None = None,
+        rewriter_enabled: bool = True,
+        rewriter_model: str = "gemini-1.5-flash",
+        history_turns: int = 6,
+    ) -> ChatResponse:
+        """Single-turn chat that keeps history under ``session_id``.
+
+        Steps:
+        1. Look up (or create) the session in ``store``.
+        2. Rewrite the question into a standalone query using up to
+           ``history_turns`` turns of prior context.
+        3. Retrieve with the rewritten query, generate with Claude (or the
+           dummy fallback) — the generation prompt sees the *original*
+           question plus the last 3 turns of history.
+        4. Append user + assistant messages back into the session.
+        """
+        # Use ``is None`` rather than ``store or ...`` — ConversationStore
+        # defines __len__, so an empty store is falsy and would silently
+        # fall through to the module default.
+        if store is None:
+            store = get_default_store()
+        session = store.get_or_create(session_id)
+
+        history = store.get_history(
+            session.session_id, last_n_turns=history_turns
+        )
+        rewritten = rewrite_question(
+            question,
+            history,
+            model_name=rewriter_model,
+            enabled=rewriter_enabled,
+        )
+        retrieval_query = rewritten or question
+
+        results = self._engine.search(retrieval_query, filters=filters, top_k=top_k)
+
+        if self._use_dummy:
+            ans = _dummy_answer(question, results)
+        else:
+            ans = self._generate_chat_answer(
+                question=question,
+                results=results,
+                history=history,
+                max_tokens=max_tokens,
+            )
+
+        # Persist turn — sources as plain dicts so the store stays
+        # JSON-friendly (the API returns them via asdict()).
+        sources_payload = [_source_to_dict(s) for s in ans.sources]
+        store.append(session.session_id, Message(role="user", content=question))
+        store.append(
+            session.session_id,
+            Message(role="assistant", content=ans.text, sources=sources_payload),
+        )
+
+        return ChatResponse(
+            session_id=session.session_id,
+            question=question,
+            rewritten_question=rewritten if rewritten != question else None,
+            answer=ans.text,
+            sources=ans.sources,
+            cited_ids=ans.cited_ids,
+            is_dummy=ans.is_dummy,
+            model=ans.model,
+        )
+
+    def _generate_chat_answer(
+        self,
+        *,
+        question: str,
+        results: list[SearchResult],
+        history: list[Message],
+        max_tokens: int,
+    ) -> Answer:
+        """Call Claude with chat-style prompt (history + retrieved context)."""
+        if any(r.body_full for r in results):
+            context = build_context(results, max_chars=self._context_max_chars)
+        else:
+            context = _format_context(results)
+
+        # Replay the last ~3 turns (= 6 messages) so Claude sees the dialog
+        # but the bulk of the budget still goes to the retrieved docs.
+        recent = history[-6:]
+        messages: list[dict[str, str]] = []
+        for m in recent:
+            if m.role not in ("user", "assistant"):
+                continue
+            messages.append({"role": m.role, "content": m.content})
+        messages.append(
+            {
+                "role": "user",
+                "content": (
+                    f"# 質問\n{question}\n\n"
+                    f"# 提供された資料 (上位 {len(results)} 件)\n\n{context}\n\n"
+                    "上記の資料のみを根拠に、出典マーク [doc_NNN] を付けて回答してください。"
+                ),
+            }
+        )
+        resp = self._client.messages.create(
+            model=self._model,
+            max_tokens=max_tokens,
+            system=CHAT_SYSTEM_PROMPT,
+            messages=messages,
+        )
+        text = "".join(block.text for block in resp.content if hasattr(block, "text"))
+        cited_ids = sorted(set(CITATION_RE.findall(text)))
+        return Answer(
+            text=text,
+            sources=results,
+            cited_ids=cited_ids,
+            is_dummy=False,
+            model=self._model,
+        )
+
+
+def _source_to_dict(s: SearchResult) -> dict[str, Any]:
+    """Plain-dict view of a SearchResult for storage / JSON serialization."""
+    return {
+        "id": s.id,
+        "title": s.title,
+        "score": s.score,
+        "axes": dict(s.axes),
+        "body_snippet": s.body_snippet,
+        "path": s.path,
+        "refs": list(s.refs),
+    }
 
 
 def _main(argv: list[str]) -> int:
