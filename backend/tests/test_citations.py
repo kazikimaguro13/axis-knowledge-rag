@@ -93,3 +93,45 @@ def test_n_sources_zero_strips_everything() -> None:
     cleaned, used = parse_and_validate_citations(text, n_sources=0)
     assert cleaned == "Anything goes."
     assert used == set()
+
+
+# --- spec_039: code-fence aware skipping --------------------------------
+
+
+def test_code_fence_skips_marker_inside() -> None:
+    text = "Outside [1].\n```python\nx = arr[1]\n```\nAlso outside [2]."
+    cleaned, used = parse_and_validate_citations(text, n_sources=2)
+    # Inside fence stays literal, outside markers preserved
+    assert "arr[1]" in cleaned  # NOT stripped
+    assert "Outside [1]" in cleaned and "outside [2]" in cleaned.lower()
+    assert used == {0, 1}  # only the outside ones
+
+
+def test_inline_code_skips_marker() -> None:
+    text = "Use `arr[1]` then cite [1]."
+    cleaned, used = parse_and_validate_citations(text, n_sources=1)
+    assert "`arr[1]`" in cleaned
+    assert "cite [1]" in cleaned
+    assert used == {0}
+
+
+def test_fence_with_language_identifier() -> None:
+    text = "```typescript\nconst x = arr[2];\n```\nCite [1]."
+    cleaned, used = parse_and_validate_citations(text, n_sources=1)
+    assert "arr[2]" in cleaned  # preserved verbatim
+    assert used == {0}
+
+
+def test_extract_citations_skips_fence() -> None:
+    text = "Before [1].\n```python\nx = arr[1]\n```\nAfter [2]."
+    offsets = extract_citations(text)
+    n_values = [n for _, _, n in offsets]
+    assert n_values == [1, 2]  # only outside-fence markers
+
+
+def test_multiple_fences_and_inline() -> None:
+    text = "Start [1].\n```\narr[1]\n```\nMiddle `arr[2]` end [2]."
+    cleaned, used = parse_and_validate_citations(text, n_sources=2)
+    assert "arr[1]" in cleaned and "`arr[2]`" in cleaned
+    assert "Start [1]" in cleaned and "end [2]" in cleaned
+    assert used == {0, 1}
