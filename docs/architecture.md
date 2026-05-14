@@ -139,6 +139,46 @@ RAGPipeline.answer(question, ...)
 JSON レスポンス → Next.js → AnswerPanel / ResultCard 表示
 ```
 
+### 3-2-bis. Conversational RAG フロー (spec_032, v0.7)
+
+履歴を保持した対話モード (`POST /api/chat`):
+
+```
+Browser / MCP / Streamlit (Chat タブ)
+      │ POST /api/chat  { question, session_id? }
+      ▼
+FastAPI  (backend/src/api.py)
+      │ ConversationStore (in-memory, TTL 24h / LRU 100)
+      │   ├─ get_or_create(session_id) → Session
+      │   └─ get_history(last_n_turns=6)
+      ▼
+question_rewriter.rewrite_question(q, history)
+      │ Gemini Flash で「履歴 + 質問 → standalone クエリ」
+      │ 失敗時は元クエリにフォールバック
+      ▼
+SearchEngine.search(rewritten_q, ...)   ← 既存パイプライン再利用
+      ▼
+RAGPipeline._generate_chat_answer(question, results, history)
+      │ CHAT_SYSTEM_PROMPT + 直近 3 turn + retrieval context
+      ▼
+ChatResponse { session_id, rewritten_question, answer, sources }
+      │ store.append(user)  + store.append(assistant) で履歴を伸ばす
+      ▼
+Browser: localStorage に session_id を保存 → 次ターンで再投入
+```
+
+設計ポイント:
+
+- **検索クエリの rewrite と生成プロンプトの履歴添付はハイブリッド**: rewrite で
+  検索精度を確保し、直近 3 turn を Claude に渡して自然な会話感を維持する
+- **rewrite は失敗してもチャットは止まらない**: API key 不在 / quota 切れ /
+  ネットワーク失敗 / 500 字超 / 空応答のいずれでも元クエリで検索を継続
+- **session storage は in-memory のみ**: v0.7 では single worker 前提。Redis 化は
+  v0.8 (spec_037) で検討
+- **MCP の session は MCP プロセス専有**: `mcp_server/_session.py` でモジュール
+  global の `ConversationStore` (max 20 sessions / 1h TTL) を持つ。FastAPI 側と
+  共有しないのが意図的設計
+
 ### 3-3. Update time (AUTO_GENERATED ブロック再生成)
 
 `marker.py` を介したナレッジ Markdown 自体の再生成:

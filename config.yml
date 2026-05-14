@@ -51,3 +51,15 @@ retrieval:
 
 rag:
   context_max_chars: 8000
+
+# spec_032: Conversational RAG (chat with history).
+# In-memory only (single uvicorn worker required). Redis / DB persistence
+# is a v0.8 candidate (spec_037).
+chat:
+  enabled: true
+  max_history_turns: 6        # 6 turn = 12 messages kept in store
+  ttl_seconds: 86400          # 24h since last access → evicted
+  max_sessions: 100           # LRU cap; oldest last_access dropped first
+  rewriter:
+    enabled: true             # false → skip rewrite, use original query
+    model: "gemini-1.5-flash"
