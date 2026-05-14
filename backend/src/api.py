@@ -14,6 +14,10 @@ from backend.src.config import (
     load_axes_config,
     settings,
 )
+from backend.src.conversation import (
+    ConversationStore,
+    configure_default_store,
+)
 from backend.src.embedder import Embedder
 from backend.src.normalizer import Normalizer
 from backend.src.rag import RAGPipeline
@@ -22,6 +26,10 @@ from backend.src.schemas import (
     AnswerResponse,
     AxesResponse,
     AxisDef,
+    ChatHistoryResponse,
+    ChatMessagePayload,
+    ChatRequest,
+    ChatResponseModel,
     HealthResponse,
     SearchRequest,
     SearchResponse,
@@ -62,10 +70,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         top_k_children=pd.top_k_children,
     )
     rag = RAGPipeline(engine, context_max_chars=app_cfg.rag.context_max_chars)
+    chat_store = ConversationStore(
+        max_sessions=app_cfg.chat.max_sessions,
+        ttl_seconds=app_cfg.chat.ttl_seconds,
+    )
+    configure_default_store(chat_store)
     _state["engine"] = engine
     _state["rag"] = rag
     _state["embedder"] = embedder
     _state["axes_cfg"] = load_axes_config()
+    _state["chat_store"] = chat_store
+    _state["chat_cfg"] = app_cfg.chat
     yield
     _state.clear()
 
@@ -156,3 +171,70 @@ async def answer(req: AnswerRequest) -> AnswerResponse:
         is_dummy=ans.is_dummy,
         model=ans.model,
     )
+
+
+# ---------------------------------------------------------------------------
+# spec_032: /api/chat — conversational RAG
+# ---------------------------------------------------------------------------
+
+
+@app.post("/api/chat", response_model=ChatResponseModel)
+async def post_chat(req: ChatRequest) -> ChatResponseModel:
+    rag: RAGPipeline = _state["rag"]
+    store: ConversationStore = _state["chat_store"]
+    chat_cfg = _state["chat_cfg"]
+    if not chat_cfg.enabled:
+        raise HTTPException(status_code=503, detail="chat is disabled in config.yml")
+    try:
+        resp = rag.chat(
+            req.question,
+            session_id=req.session_id,
+            filters=req.filters or None,
+            top_k=req.top_k,
+            max_tokens=req.max_tokens,
+            store=store,
+            rewriter_enabled=chat_cfg.rewriter.enabled,
+            rewriter_model=chat_cfg.rewriter.model,
+            history_turns=chat_cfg.max_history_turns,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+    return ChatResponseModel(
+        session_id=resp.session_id,
+        question=resp.question,
+        rewritten_question=resp.rewritten_question,
+        answer=resp.answer,
+        cited_ids=resp.cited_ids,
+        sources=[_to_payload(s) for s in resp.sources],
+        is_dummy=resp.is_dummy,
+        model=resp.model,
+    )
+
+
+@app.get("/api/chat/{session_id}", response_model=ChatHistoryResponse)
+async def get_chat_history(session_id: str) -> ChatHistoryResponse:
+    store: ConversationStore = _state["chat_store"]
+    # We deliberately treat "unknown id" as 404 — auto-creating on GET would
+    # confuse clients that use it to probe whether a session is still alive.
+    if session_id not in store._sessions:  # noqa: SLF001
+        raise HTTPException(status_code=404, detail="session not found")
+    session = store.get_or_create(session_id)
+    return ChatHistoryResponse(
+        session_id=session.session_id,
+        messages=[
+            ChatMessagePayload(
+                role=m.role,
+                content=m.content,
+                sources=m.sources,
+                timestamp=m.timestamp,
+            )
+            for m in session.messages
+        ],
+    )
+
+
+@app.delete("/api/chat/{session_id}", status_code=204)
+async def delete_chat(session_id: str) -> None:
+    store: ConversationStore = _state["chat_store"]
+    if not store.delete(session_id):
+        raise HTTPException(status_code=404, detail="session not found")

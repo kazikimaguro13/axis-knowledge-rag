@@ -73,12 +73,35 @@ class RAGConfig:
     context_max_chars: int = 8000
 
 
+# ---------------------------------------------------------------------------
+# spec_032: conversational RAG settings
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ChatRewriterConfig:
+    enabled: bool = True
+    model: str = "gemini-1.5-flash"
+
+
+@dataclass(frozen=True)
+class ChatConfig:
+    """Settings for the conversational ``/api/chat`` path."""
+
+    enabled: bool = True
+    max_history_turns: int = 6   # 6 turn = 12 messages kept in store
+    ttl_seconds: int = 86400     # 24h since last access → evicted
+    max_sessions: int = 100      # LRU cap
+    rewriter: ChatRewriterConfig = field(default_factory=ChatRewriterConfig)
+
+
 @dataclass(frozen=True)
 class AppConfig:
-    """Aggregated runtime config (axes + retrieval + rag)."""
+    """Aggregated runtime config (axes + retrieval + rag + chat)."""
 
     retrieval: RetrievalConfig = field(default_factory=RetrievalConfig)
     rag: RAGConfig = field(default_factory=RAGConfig)
+    chat: ChatConfig = field(default_factory=ChatConfig)
 
 
 def load_app_config(path: Path | None = None) -> AppConfig:
@@ -101,6 +124,8 @@ def load_app_config(path: Path | None = None) -> AppConfig:
     retr_raw = (raw.get("retrieval") or {}) if isinstance(raw, dict) else {}
     pd_raw = (retr_raw.get("parent_doc") or {}) if isinstance(retr_raw, dict) else {}
     rag_raw = (raw.get("rag") or {}) if isinstance(raw, dict) else {}
+    chat_raw = (raw.get("chat") or {}) if isinstance(raw, dict) else {}
+    rew_raw = (chat_raw.get("rewriter") or {}) if isinstance(chat_raw, dict) else {}
 
     pd = ParentDocConfig(
         enabled=bool(pd_raw.get("enabled", ParentDocConfig.enabled)),
@@ -112,4 +137,17 @@ def load_app_config(path: Path | None = None) -> AppConfig:
     rag = RAGConfig(
         context_max_chars=int(rag_raw.get("context_max_chars", RAGConfig.context_max_chars)),
     )
-    return AppConfig(retrieval=RetrievalConfig(parent_doc=pd), rag=rag)
+    rewriter = ChatRewriterConfig(
+        enabled=bool(rew_raw.get("enabled", ChatRewriterConfig.enabled)),
+        model=str(rew_raw.get("model", ChatRewriterConfig.model)),
+    )
+    chat = ChatConfig(
+        enabled=bool(chat_raw.get("enabled", ChatConfig.enabled)),
+        max_history_turns=int(
+            chat_raw.get("max_history_turns", ChatConfig.max_history_turns)
+        ),
+        ttl_seconds=int(chat_raw.get("ttl_seconds", ChatConfig.ttl_seconds)),
+        max_sessions=int(chat_raw.get("max_sessions", ChatConfig.max_sessions)),
+        rewriter=rewriter,
+    )
+    return AppConfig(retrieval=RetrievalConfig(parent_doc=pd), rag=rag, chat=chat)
