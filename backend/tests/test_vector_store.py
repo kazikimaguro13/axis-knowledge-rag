@@ -167,7 +167,7 @@ def test_add_chunks_persists_parents_and_embeds_children(
     store.add_chunks(parents, children, embeddings)
 
     assert store.count() == len(children)
-    assert (tmp_path / "chroma" / "parents.json").exists()
+    assert (tmp_path / "chroma" / "parents.db").exists()  # spec_037: SQLite default
 
 
 def test_query_with_parents_groups_children_to_top_n(
@@ -208,11 +208,11 @@ def test_load_parents_reads_sidecar(tmp_path: Path, dummy_embedder: Embedder) ->
     embeddings = dummy_embedder.embed_batch([c.text for c in children])
     store.add_chunks(parents, children, embeddings)
 
-    # Re-open: the in-memory parents dict starts empty, load from sidecar.
+    # Re-open: the in-memory parents cache starts empty; SQLite has the data.
     fresh = VectorStore(path=db_dir)
     assert fresh.parents == {}
-    assert fresh.has_parents() is True  # sidecar exists
-    n = fresh.load_parents()
+    assert fresh.has_parents() is True  # storage has data
+    n = fresh.load_parents()            # populate cache from SQLite
     assert n == 1
     assert next(iter(fresh.parents.values())).title == "H"
 
@@ -238,7 +238,66 @@ def test_reset_clears_parents_sidecar(
     parents, children = chunk_markdown("kb/r.md", "## R\n\nbody.", {})
     embeddings = dummy_embedder.embed_batch([c.text for c in children])
     store.add_chunks(parents, children, embeddings)
-    assert (db_dir / "parents.json").exists()
+    assert (db_dir / "parents.db").exists()  # spec_037: SQLite default
     store.reset()
-    assert not (db_dir / "parents.json").exists()
+    assert not store.has_parents()           # storage cleared
     assert store.parents == {}
+
+
+# ---------------------------------------------------------------------------
+# spec_037: SQLite storage path tests (3 tests)
+# ---------------------------------------------------------------------------
+
+
+def test_sqlite_has_parents_true_after_add(
+    tmp_path: Path, dummy_embedder: Embedder
+) -> None:
+    """has_parents() reflects SQLite state even on a fresh VectorStore instance."""
+    from backend.src.chunker import chunk_markdown
+
+    db_dir = tmp_path / "chroma"
+    store = VectorStore(path=db_dir)
+    parents, children = chunk_markdown("kb/s.md", "## S\n\nbody.", {})
+    embeddings = dummy_embedder.embed_batch([c.text for c in children])
+    store.add_chunks(parents, children, embeddings)
+
+    fresh = VectorStore(path=db_dir)
+    assert fresh.has_parents() is True
+    assert fresh.parents == {}  # cache not yet populated
+
+
+def test_sqlite_load_parents_returns_correct_count(
+    tmp_path: Path, dummy_embedder: Embedder
+) -> None:
+    """load_parents() returns the number of parents loaded from SQLite."""
+    from backend.src.chunker import chunk_markdown
+
+    db_dir = tmp_path / "chroma"
+    store = VectorStore(path=db_dir)
+    for i in range(3):
+        parents, children = chunk_markdown(
+            f"kb/doc{i}.md", f"## Section {i}\n\nparagraph {i}.", {}
+        )
+        embeddings = dummy_embedder.embed_batch([c.text for c in children])
+        store.add_chunks(parents, children, embeddings)
+
+    fresh = VectorStore(path=db_dir)
+    n = fresh.load_parents()
+    assert n == 3
+
+
+def test_sqlite_has_parents_false_after_reset(
+    tmp_path: Path, dummy_embedder: Embedder
+) -> None:
+    """has_parents() returns False after reset(), even though parents.db file remains."""
+    from backend.src.chunker import chunk_markdown
+
+    db_dir = tmp_path / "chroma"
+    store = VectorStore(path=db_dir)
+    parents, children = chunk_markdown("kb/t.md", "## T\n\nbody.", {})
+    embeddings = dummy_embedder.embed_batch([c.text for c in children])
+    store.add_chunks(parents, children, embeddings)
+    assert store.has_parents() is True
+
+    store.reset()
+    assert store.has_parents() is False
