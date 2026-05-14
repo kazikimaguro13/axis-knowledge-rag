@@ -44,6 +44,7 @@ eval = [
     "datasets>=2.20",
     "langchain-google-genai>=2.0",
     "langchain-core>=0.3",
+    "scipy>=1.10,<2",
 ]
 redis = [
     "redis>=5.0,<6",
