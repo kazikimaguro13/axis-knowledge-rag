@@ -187,6 +187,89 @@ RAG 回答生成。検索 + Claude による回答文を返す。`ANTHROPIC_API_
 
 ---
 
+### `POST /api/chat`  (spec_032, v0.7)
+
+履歴を保持した対話的 RAG。`session_id` を返すので、次のターンに再投入すれば follow-up が成立する。
+代名詞 (「それの利点は?」) は Gemini Flash で自動的に standalone クエリへ書き換えられる
+(失敗時は元クエリにフォールバックして UX は止まらない)。
+
+**Request body**
+
+```json
+{
+  "question": "それの利点は？",
+  "session_id": "a1b2c3d4-...",
+  "filters": {"category": "技術記事"},
+  "top_k": 5,
+  "max_tokens": 1024
+}
+```
+
+| フィールド | 型 | デフォルト | 説明 |
+|---|---|---|---|
+| `question` | string | — | 質問文 (1〜1000 字、必須) |
+| `session_id` | string \| null | `null` | 既存の session id。null/未指定で新規発番 |
+| `filters` | object | `{}` | 軸フィルタ (search と同形式) |
+| `top_k` | integer | `5` | 検索件数 (1–20) |
+| `max_tokens` | integer | `1024` | 回答の最大トークン数 (128–4096) |
+
+**Response 200**
+
+```json
+{
+  "session_id": "a1b2c3d4-7e8f-...",
+  "question": "それの利点は？",
+  "rewritten_question": "RAG の利点は？",
+  "answer": "RAG の主な利点は...[doc_001]...",
+  "cited_ids": ["doc_001"],
+  "sources": [ /* SearchResult と同形式 */ ],
+  "is_dummy": false,
+  "model": "claude-3-5-sonnet-20241022"
+}
+```
+
+| フィールド | 型 | 説明 |
+|---|---|---|
+| `session_id` | string | このターンで使われた / 新規発番された session id |
+| `rewritten_question` | string \| null | rewrite が実際に起きた場合のみ非 null |
+
+**Errors**: 422 — バリデーション失敗 / 500 — 内部エラー / 503 — `config.yml > chat.enabled=false`
+
+> **Single worker 前提**: session はサーバプロセス内 memory に置かれる。
+> `uvicorn --workers >1` で動かすと worker 間で session が共有されず、
+> 同じ session_id でも別履歴を見ることになる。v0.7 では `--workers 1` を維持してほしい
+> (Redis 永続化は v0.8 候補 — spec_037)。
+
+---
+
+### `GET /api/chat/{session_id}`  (spec_032)
+
+セッションの履歴 (全メッセージ) を取得する。
+
+**Response 200**
+
+```json
+{
+  "session_id": "a1b2c3d4-...",
+  "messages": [
+    {"role": "user", "content": "RAG とは?", "sources": [], "timestamp": "2026-05-14T05:00:00+00:00"},
+    {"role": "assistant", "content": "RAG とは...", "sources": [...], "timestamp": "..."}
+  ]
+}
+```
+
+**Errors**: 404 — session_id が存在しない (TTL 切れ / 未作成 / DELETE 済み)
+
+---
+
+### `DELETE /api/chat/{session_id}`  (spec_032)
+
+セッションをリセットする。成功時は `204 No Content`。
+
+**Errors**: 404 — session_id が存在しない
+
+---
+
 ### `GET /api/docs`
 
 Swagger UI (自動生成)。ブラウザで `http://localhost:8000/api/docs` を開くとインタラクティブに試せる。

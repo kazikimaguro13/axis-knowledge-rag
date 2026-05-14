@@ -2,6 +2,36 @@
 
 ## [Unreleased]
 
+### Day 32 (2026-05-14) — Conversational RAG (履歴保持チャット) (spec_032)
+
+- backend/src/conversation.py: 新規。in-memory `ConversationStore` (TTL 24h + LRU 100 sessions / `threading.Lock` でスレッドセーフ)、`Message` / `Session` frozen dataclass、モジュール global の default store を `get_default_store()` / `configure_default_store()` / `reset_default_store()` で操作
+- backend/src/question_rewriter.py: 新規。Gemini Flash (`gemini-1.5-flash`) で「履歴 + 最後の質問 → standalone クエリ」へ rewrite。API key 不在 / 例外 / 500 字超 / 空応答時は元クエリにフォールバック (UX を絶対に止めない)。`書き換え後の質問:` などの leak prefix を strip
+- backend/src/rag.py: `RAGPipeline.chat()` を追加 — rewrite → search → 生成 → store.append の 4 ステップ。`CHAT_SYSTEM_PROMPT` で「履歴と検索結果が矛盾したら検索結果を優先」を指示、直近 3 turn (= 6 messages) を Claude messages に添付。`ChatResponse` dataclass を公開、`_source_to_dict()` で SearchResult を JSON-friendly に
+- backend/src/api.py: `POST /api/chat` / `GET /api/chat/{sid}` / `DELETE /api/chat/{sid}` を追加。lifespan で `ConversationStore(max_sessions, ttl_seconds)` を `_state["chat_store"]` に保持 + `configure_default_store()` で global にも反映
+- backend/src/schemas.py: `ChatRequest` / `ChatResponseModel` / `ChatMessagePayload` / `ChatHistoryResponse` を追加
+- backend/src/config.py: `ChatConfig` / `ChatRewriterConfig` を追加し `load_app_config()` で `config.yml > chat.{enabled, max_history_turns, ttl_seconds, max_sessions, rewriter.{enabled, model}}` を読み込み
+- config.yml: `chat.*` ブロックを追加 (default `enabled: true`, `max_history_turns: 6`, `ttl_seconds: 86400`, `max_sessions: 100`, `rewriter.model: gemini-1.5-flash`)
+- mcp_server/server.py: `axis_chat` tool を追加 — session_id を保持すれば follow-up が効く対話 RAG。`mcp_server/_session.py` でモジュール global `ConversationStore(max_sessions=20, ttl_seconds=3600)` を持つ (FastAPI 側 store とは独立、MCP プロセス再起動で消える旨を tool docstring に明記)
+- mcp_server/schemas.py: `ChatInput` Pydantic 入力を追加
+- mcp_server/formatters.py: `format_chat_md()` / `format_chat_json()` を追加 (rewritten_question を caption 表示、session_id を末尾に明示)
+- streamlit_app.py: `st.tabs(["🔎 Search", "💬 Chat"])` で 2 タブ構成に。Chat タブは `st.chat_input` / `st.chat_message` + 「会話をリセット」ボタン + 出典 expander、`AXIS_API_BASE` 環境変数で backend URL を切り替え可能
+- frontend/src/lib/chatClient.ts: 新規 `postChat()` / `deleteChat()` + localStorage に session_id を保存 (key=`axis-chat-session-id`)
+- frontend/src/components/ChatMessage.tsx: 新規。user/assistant でバブル分け、`[doc_NNN]` をハイライト、`📚 出典` を折りたたみ表示、`🔁 rewritten` を caption で表示
+- frontend/src/components/ChatInput.tsx: 新規。Enter 送信 + disabled 状態
+- frontend/src/app/chat/page.tsx: 新規。App Router の `/chat` ページ。`useEffect` で localStorage から session_id 復元 + auto-scroll
+- frontend/src/app/layout.tsx: ナビに `💬 Chat` リンク追加
+- backend/tests/test_conversation.py: 新規 12 件 — new/existing session, append+history, history truncation, unknown id → []、TTL eviction (last_access を手動で過去化)、LRU eviction (max=2 で 3 つ作って最古が消える)、delete、thread safety (10 threads × 10 appends = 100 messages 無損失)、default store lifecycle、append on unknown session
+- backend/tests/test_question_rewriter.py: 新規 8 件 — 空 history / disabled / no API key / 代名詞解決 (`それの利点は?` + `LangChain` history → `LangChain` を含む書き換え) / API 例外 fallback / 500 字超 fallback / 空応答 fallback / leak prefix strip。`google.generativeai` を monkeypatch で stub
+- backend/tests/test_api.py: 新規 6 件 — `/api/chat` で session 発番、同 session_id で再利用、`GET /api/chat/{sid}` で 4 messages 取得、unknown session 404、`DELETE` で 204 → 再 GET 404、empty question で 422
+- backend/tests/test_rag.py: 新規 3 件 — `chat()` で session 作成 + 履歴 append、session 再利用で履歴蓄積、empty history では `rewritten_question=None`
+- docs/adr/ADR-018-conversational-rag.md: 新規 ADR — Context (single-shot RAG では follow-up が無理) / Decision (in-memory store + Gemini rewrite + hybrid prompt) / Alternatives (LangChain / Redis / full history / streaming) / Consequences (single-worker 制約, 再起動で session 消滅)
+- docs/api-reference.md: `/api/chat` の 3 endpoint と single-worker 注記を追加
+- docs/architecture.md: §3-2-bis に Conversational RAG フロー (ASCII 図 + 設計ポイント) を追加
+- README.md: ✨ 特徴 に「💬 Conversational RAG (履歴保持チャット)」行を追加、ADR-018 へリンク
+- 設計バグ修正: `ConversationStore` に `__len__` を定義したことで `store or get_default_store()` がスペース 0 で false 評価される問題を発見、`if store is None` で明示判定するよう修正
+- 既存 169 tests + 新規 24 tests = **193 件全パス**、ruff 緑
+- 設計の意図: LangChain を避けつつ chat UX を成立させる最少コード。rewrite (検索精度) + 短い履歴添付 (会話感) のハイブリッドで両立。in-memory は v0.7 demo / 個人運用に十分、Redis 化は v0.8 (spec_037) で検討
+
 ### Day 33 (2026-05-14) — RAGAS CI/CD (LLM-as-a-Judge 自動評価) (spec_033)
 
 - evaluation/__init__.py: 新規。evaluation パッケージ初期化
