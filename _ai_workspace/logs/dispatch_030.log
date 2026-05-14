@@ -1,7 +1,0 @@
-[2026-05-14T00:39:40+09:00] dispatch v4 start
-  spec     = /home/nakashima/projects/axis-knowledge-rag/_ai_workspace/bridge/inbox/spec_030.md (239 lines)
-  branch   = feat/spec_030-readme-cleanup
-  claude   = /home/nakashima/.npm-global/bin/claude (2.1.139 (Claude Code))
-  prompt len = 8197 chars
-[2026-05-14T00:39:41+09:00] launching claude...
-[2026-05-14T00:39:54+09:00] claude exited code=0

@@ -74,3 +74,10 @@ Thumbs.db
 
 # build artifacts
 *.egg-info/
+
+# === _ai_workspace (bridge workflow artifacts) ===
+# bridge/ inbox / outbox / dispatch scripts are public marketing artifacts (see ADR / blog),
+# but logs and resume notes are ephemeral / verbose — keep them out of git.
+_ai_workspace/logs/
+_ai_workspace/RESUME_*.md
+_ai_workspace/*_nohup.out

@@ -1,6 +1,0 @@
-[dispatch] spec    = _ai_workspace/bridge/inbox/spec_029.md
-[dispatch] result  = _ai_workspace/bridge/outbox/result_029.md
-[dispatch] account = dev-b (CLAUDE_CONFIG_DIR=/home/nakashima/.claude-project-b)
-[dispatch] branch  = feat/spec_029-bm25-hybrid
-_ai_workspace/bridge/dispatch.sh: 行 33: "/home/nakashima/.npm-global/bin/claude": そのようなファイルやディレクトリはありません
-[dispatch] claude  = /home/nakashima/.npm-global/bin/claude ()

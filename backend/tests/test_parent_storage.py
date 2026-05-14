@@ -1,7 +1,9 @@
 """Tests for parent_storage.py: Protocol contract + SQLite-specific + migration."""
 
-import pytest
 from pathlib import Path
+
+import pytest
+
 from backend.src.chunker import ParentChunk
 from backend.src.parent_storage import (
     JsonParentStorage,
