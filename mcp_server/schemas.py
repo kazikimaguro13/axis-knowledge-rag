@@ -99,6 +99,30 @@ class ListDocumentsInput(_BaseInput):
     response_format: ResponseFormat = Field(default=ResponseFormat.MARKDOWN)
 
 
+class ChatInput(_BaseInput):
+    question: str = Field(
+        ...,
+        description="User's question (may be a follow-up that depends on prior turns).",
+        min_length=1,
+        max_length=1000,
+    )
+    session_id: str | None = Field(
+        default=None,
+        description=(
+            "Existing session id from a previous axis_chat call. Omit to start a "
+            "fresh conversation; the server will return a new session_id you can "
+            "feed back into the next call to keep context."
+        ),
+    )
+    filters: dict[str, str | int] = Field(
+        default_factory=dict,
+        description="Optional axis filters (same shape as axis_search).",
+    )
+    top_k: int = Field(default=5, ge=1, le=20)
+    max_tokens: int = Field(default=1024, ge=128, le=4096)
+    response_format: ResponseFormat = Field(default=ResponseFormat.MARKDOWN)
+
+
 class IngestInput(_BaseInput):
     raw_text: str = Field(
         ...,

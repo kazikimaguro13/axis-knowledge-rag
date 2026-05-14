@@ -102,6 +102,47 @@ def format_answer_json(question: str, answer: Any) -> str:
     return json.dumps(payload, ensure_ascii=False, indent=2)
 
 
+def format_chat_md(question: str, resp: Any) -> str:
+    """Format a ``ChatResponse`` (from rag.chat()) as markdown."""
+    lines = [f"# Chat — `{resp.session_id}`", ""]
+    if resp.is_dummy:
+        lines.append("> _DUMMY mode (no ANTHROPIC_API_KEY)_\n")
+    if resp.rewritten_question:
+        lines.append(f"_rewritten query_: `{resp.rewritten_question}`\n")
+    lines.append(f"**Q**: {question}\n")
+    lines.append("**A**:")
+    lines.append(resp.answer)
+    lines.append("")
+    if resp.sources:
+        lines.append("## Sources")
+        for s in resp.sources:
+            marker = "* cited" if s.id in resp.cited_ids else ""
+            lines.append(
+                f"- `{s.id}` — {s.title} (score {s.score:.3f}) {marker}".strip()
+            )
+    lines.append("")
+    lines.append(f"_session_id_: `{resp.session_id}` (pass back to continue the chat)")
+    return "\n".join(lines)
+
+
+def format_chat_json(question: str, resp: Any) -> str:
+    """Format a ``ChatResponse`` as JSON."""
+    payload = {
+        "session_id": resp.session_id,
+        "question": question,
+        "rewritten_question": resp.rewritten_question,
+        "answer": resp.answer,
+        "cited_ids": resp.cited_ids,
+        "is_dummy": resp.is_dummy,
+        "model": resp.model,
+        "sources": [
+            {"id": s.id, "title": s.title, "score": s.score, "axes": s.axes}
+            for s in resp.sources
+        ],
+    }
+    return json.dumps(payload, ensure_ascii=False, indent=2)
+
+
 def format_axes_md(axes: list[dict]) -> str:
     lines = ["# Available axes", ""]
     for a in axes:

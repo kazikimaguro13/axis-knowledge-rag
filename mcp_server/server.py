@@ -32,16 +32,20 @@ from backend.src.rag import RAGPipeline
 from backend.src.search import SearchEngine, _build_where_norm
 from backend.src.vector_store import VectorStore
 from mcp_server._errors import make_error_response
+from mcp_server._session import mcp_chat_store
 from mcp_server.formatters import (
     format_answer_json,
     format_answer_md,
     format_axes_md,
+    format_chat_json,
+    format_chat_md,
     format_integrity_md,
     format_search_results_json,
     format_search_results_md,
 )
 from mcp_server.schemas import (
     AnswerInput,
+    ChatInput,
     CheckIntegrityInput,
     IngestInput,
     ListAxesInput,
@@ -224,7 +228,54 @@ async def axis_answer(params: AnswerInput) -> str:
 
 
 # ============================================================================
-# Tool 3: axis_list_axes
+# Tool 3: axis_chat (spec_032)
+# ============================================================================
+@mcp.tool(
+    name="axis_chat",
+    annotations=ToolAnnotations(
+        title="Conversational RAG (history-aware)",
+        readOnlyHint=True,
+        destructiveHint=False,
+        idempotentHint=False,
+        openWorldHint=True,
+    ),
+)
+async def axis_chat(params: ChatInput) -> str:
+    """Conversational RAG. Pass back the returned ``session_id`` to keep history.
+
+    Best when:
+    - The user is having a multi-turn dialog ("RAG とは?" → "それの利点は?")
+    - You want follow-up questions to be rewritten into standalone queries
+      automatically via Gemini Flash
+
+    NOTE: sessions live in the MCP process memory — they are lost when the
+    MCP process restarts (e.g., Claude Desktop reload). Persisting to disk
+    is a v0.8 candidate (spec_037). Cap: 20 sessions / 1h TTL.
+    """
+    try:
+        rag = _get_rag()
+        app_cfg = load_app_config()
+        cfg = app_cfg.chat
+        resp = rag.chat(
+            params.question,
+            session_id=params.session_id,
+            filters=params.filters or None,
+            top_k=params.top_k,
+            max_tokens=params.max_tokens,
+            store=mcp_chat_store,
+            rewriter_enabled=cfg.rewriter.enabled,
+            rewriter_model=cfg.rewriter.model,
+            history_turns=cfg.max_history_turns,
+        )
+        if params.response_format == ResponseFormat.JSON:
+            return format_chat_json(params.question, resp)
+        return format_chat_md(params.question, resp)
+    except Exception as e:
+        return make_error_response("axis_chat", e)
+
+
+# ============================================================================
+# Tool 4: axis_list_axes
 # ============================================================================
 @mcp.tool(
     name="axis_list_axes",
