@@ -145,3 +145,33 @@ class TestMigration:
         assert p.doc_id == "doc42"
         assert p.metadata == {"k": "v"}
         store.close()
+
+
+class TestSqliteSpecificScaling:
+    """spec_042 MID #2 — chunking around SQLite's 999 bind-variable limit."""
+
+    def test_get_many_999_no_error(self, tmp_path: Path):
+        """Boundary: exactly 999 ids should fit in a single query."""
+        s = SqliteParentStorage(tmp_path / "p.db")
+        s.upsert_many([make_parent(pid=f"p{i:04d}") for i in range(999)])
+        fetched = s.get_many([f"p{i:04d}" for i in range(999)])
+        assert len(fetched) == 999
+        s.close()
+
+    def test_get_many_exactly_at_limit(self, tmp_path: Path):
+        """1000 ids — one chunk over the limit triggers the second query."""
+        s = SqliteParentStorage(tmp_path / "p.db")
+        s.upsert_many([make_parent(pid=f"p{i:04d}") for i in range(1000)])
+        fetched = s.get_many([f"p{i:04d}" for i in range(1000)])
+        assert len(fetched) == 1000
+        s.close()
+
+    def test_get_many_2500_ids_preserves_order(self, tmp_path: Path):
+        """2500 ids spans 3 chunks. Verify count + input order preservation."""
+        s = SqliteParentStorage(tmp_path / "p.db")
+        s.upsert_many([make_parent(pid=f"p{i:05d}") for i in range(2500)])
+        ids_to_fetch = [f"p{i:05d}" for i in range(2500)]
+        fetched = s.get_many(ids_to_fetch)
+        assert len(fetched) == 2500
+        assert [p.parent_id for p in fetched] == ids_to_fetch
+        s.close()
