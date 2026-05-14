@@ -2,6 +2,39 @@
 
 ## [Unreleased]
 
+### Day 40 (2026-05-14) — GraphRAG + 3D Knowledge Graph (spec_040)
+
+v0.8 マーキー機能。YAML frontmatter の `refs:` フィールドを *初めて* 検索 / 可視化のソースとして活用する。
+
+- backend/src/graph.py: 新規。`KnowledgeGraph` クラス (networkx.DiGraph ラッパ) + `GraphNode` / `GraphEdge` frozen dataclass。`build_from_docs()` (broken refs を warning + skip、self-loop は silently skip、循環参照は許容) / `neighbors_within_hop(direction="out|in|both")` / `get_node` / `get_all_nodes(limit, offset)` / `find_path(max_length)` / `stats()`。`build_default_graph(knowledge_dir)` ヘルパで `examples/knowledge` から起動時に build
+- backend/src/config.py: `GraphConfig(enabled=True, default_hop=1, max_neighbors_per_query=20, expand_on_search=False, knowledge_dir="./examples/knowledge")` を追加。`load_app_config()` で `config.yml > graph.*` をパース
+- config.yml: `graph.*` ブロックを追加 (default `enabled: true`, `expand_on_search: false` — 既存検索の挙動は完全互換)
+- backend/src/search.py: `SearchEngine.__init__(graph=None)` + `search(graph_expand=False, graph_hop=1, graph_max_neighbors=10)` を追加。`_expand_with_graph()` で上位 5 件の seed に対して 1 hop 隣接を BFS し、score = 元 × 0.7 でマージ + 再ランク。`_fetch_doc_as_result()` は file-level Chroma `.get(ids=[doc_id])` で metadata + body を引き、parent-doc モード時は store.parents から fallback
+- backend/src/api.py: lifespan で `build_default_graph(app_cfg.graph.knowledge_dir)` を呼んで `_state["graph"]` に格納し、`SearchEngine(graph=graph)` に渡す。`GET /api/graph` (limit/offset + axes_category/axes_level フィルタ) / `GET /api/graph/{doc_id}/neighbors` (hop, max_neighbors) を追加。`/api/search` も `graph_expand` / `graph_hop` / `graph_max_neighbors` を受け付ける (config の `expand_on_search` と OR)
+- backend/src/schemas.py: `SearchRequest` に `graph_expand` / `graph_hop` / `graph_max_neighbors` を追加。`GraphNodeModel` / `GraphEdgeModel` / `GraphStats` / `GraphResponse` / `NeighborResponse` Pydantic v2 を追加
+- mcp_server/server.py: `axis_neighbors` tool を追加 (`doc_id` + `hop` + `direction` + `max_neighbors`)。グラフは module global で 1 回 lazy build (`_get_graph()`)
+- mcp_server/schemas.py: `NeighborsInput` を追加 (`direction="out|in|both"` を含む)
+- mcp_server/formatters.py: `format_neighbors_md()` / `format_neighbors_json()` を追加
+- frontend/src/lib/graphClient.ts: 新規。`fetchGraph(filters)` / `fetchNeighbors(docId, hop, max)` + TypeScript インタフェース
+- frontend/src/components/Knowledge3DGraph.tsx: 新規。`react-force-graph-3d` ラッパ、category 軸で色分け、node size = 1 + in_degree + out_degree、矢印付き有向エッジ
+- frontend/src/components/GraphSidebar.tsx: 新規。クリックされた node の `/api/graph/{id}/neighbors` を表示
+- frontend/src/components/GraphFilterBar.tsx: 新規。category / level dropdown + stats overlay
+- frontend/src/app/graph/page.tsx: 新規。`/graph` route、`dynamic({ ssr: false })` で react-force-graph-3d を遅延ロード
+- frontend/src/app/layout.tsx: nav に "🕸️ Graph" リンクを追加
+- frontend/package.json: `react-force-graph-3d@^1.24` / `three@^0.160` / `d3-force-3d@^3.0` を追加
+- streamlit_app.py: 第 3 タブ `🕸️ Graph` を追加 — `/api/graph` を fetch → networkx + matplotlib で 2D spring layout 描画 (category 軸で色分け)
+- pyproject.toml: `networkx>=3.0,<4` を main deps に追加 (~600 KB)
+- backend/tests/test_graph.py: 新規 21 件 — empty / single / directed edge / self-loop skip / broken ref warn / hop=1/2 / max_neighbors cap / direction out/in/both / unknown node / get_node degree / pagination / stats / find_path (exists / no_path / self / max_length 超過) / 循環参照
+- backend/tests/test_search.py: 新規 5 件 — graph_expand で隣接追加 / dedup / score=元 × 0.7 / graph=None で no-op + warning / max_neighbors cap
+- backend/tests/test_api.py: 新規 4 件 — `/api/graph` 200 + nodes/edges/stats / category フィルタ / `/api/graph/{id}/neighbors` 200 / unknown doc → 404
+- docs/adr/ADR-024-graphrag-retrieval-expansion.md: 新規。Context (refs が integrity 専用で retrieval に使われていなかった) / Decision (1 hop expansion + 0.7× decay, opt-in) / Alternatives (Neo4j / ChromaDB metadata / PageRank) / Consequences (networkx 依存 / 結果セット最大 +50 / default off)
+- docs/adr/ADR-025-3d-graph-visualization.md: 新規。Context (リスト UI 一辺倒) / Decision (react-force-graph-3d + dynamic({ssr:false})) / Alternatives (sigma.js / Cytoscape / Three raw) / Consequences (deps 増 / WebGL 必須 / ~1000 node 上限)
+- docs/architecture.md: §3-3 "Graph layer" を追加 (ASCII フロー図 + 設計ポイント 3 点)、旧 §3-3 を §3-4 にリナンバ
+- docs/api-reference.md: `/api/graph` + `/api/graph/{id}/neighbors` + `/api/search` の graph_expand パラメータを追記
+- docs/mcp-server.md: §3-7 `axis_neighbors` の入出力スキーマと Markdown サンプル
+- README.md: ✨ 特徴 に "🕸️ GraphRAG + 3D Visualization"、⚙️ config.yml テーブルに `graph.*` 行を追加
+- 既存 261 tests に回帰なし、合計 **291 tests pass**、ruff 緑、`npm run build` 緑
+
 ### Day 34 (2026-05-14) — In-Text Citation Highlighting (spec_034)
 
 - backend/src/_citations.py: 新規。`parse_and_validate_citations()` / `extract_citations()` の 2 関数。`[N]` (1-indexed) インライン引用マーカーをパースし、`[1, 2]` を `[1][2]` に正規化、out-of-range な N (`N > len(sources)`) は silently strip + warning ログ。新規依存 0

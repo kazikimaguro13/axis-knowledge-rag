@@ -286,6 +286,72 @@ RAG 回答生成。検索 + Claude による回答文を返す。`ANTHROPIC_API_
 
 ---
 
+### `GET /api/graph`  (spec_040, v0.8)
+
+YAML frontmatter `refs:` から構築した有向グラフ全体を返す。Next.js `/graph` の
+3D 描画と Streamlit Graph タブが利用する。`config.yml` `graph.enabled: false`
+の場合は 503 を返す。
+
+**Query parameters**:
+
+| 名前 | 型 | デフォルト | 説明 |
+|---|---|---|---|
+| `limit` | int | 500 | 返却ノード数の上限 (1–2000) |
+| `offset` | int | 0 | ページング開始位置 |
+| `axes_category` | str | none | category 軸フィルタ (完全一致) |
+| `axes_level` | str | none | level 軸フィルタ (完全一致) |
+
+**Response**:
+
+```json
+{
+  "nodes": [
+    {"id": "doc_001", "title": "RAG...", "axes": {"category": "技術記事"}, "in_degree": 2, "out_degree": 0}
+  ],
+  "edges": [{"source": "doc_002", "target": "doc_001"}],
+  "stats": {"nodes": 10, "edges": 5, "isolated": 2, "weakly_connected_components": 4}
+}
+```
+
+---
+
+### `GET /api/graph/{doc_id}/neighbors`  (spec_040)
+
+単一 doc の N hop 隣接を返す。Frontend サイドパネルで使用。
+
+**Path parameters**: `doc_id` — 検索対象の document id (例: `doc_001`)
+
+**Query parameters**:
+
+| 名前 | 型 | デフォルト | 説明 |
+|---|---|---|---|
+| `hop` | int | 1 | BFS の深さ (1–3) |
+| `max_neighbors` | int | 20 | 返却隣接数の上限 (1–100) |
+
+**Response**:
+
+```json
+{
+  "center": {"id": "doc_001", "title": "...", "axes": {}, "in_degree": 2, "out_degree": 0},
+  "neighbors": [{"id": "doc_002", "title": "...", "axes": {}, "in_degree": 0, "out_degree": 1}],
+  "hop": 1
+}
+```
+
+**Errors**: 404 — `doc_id` がグラフに存在しない / 503 — graph 機能無効
+
+---
+
+### `POST /api/search` の graph_expand パラメータ  (spec_040)
+
+`SearchRequest` に `graph_expand: bool` (default `false`), `graph_hop: int`
+(default 1), `graph_max_neighbors: int` (default 10) を追加。`true` の場合、
+上位 5 件のヒットに対して 1 hop 隣接をマージし、隣接スコア = 元 × 0.7 で
+再ランクする。`config.yml` `graph.expand_on_search: true` で server-side default
+を反転可能。
+
+---
+
 ### `GET /api/docs`
 
 Swagger UI (自動生成)。ブラウザで `http://localhost:8000/api/docs` を開くとインタラクティブに試せる。

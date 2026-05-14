@@ -416,3 +416,127 @@ def test_time_decay_result_metadata_field_present(
     results = engine.search("RAG", top_k=1)
     assert results
     assert isinstance(results[0].metadata, dict)
+
+
+# ---------------------------------------------------------------------------
+# spec_040: graph_expand integration
+# ---------------------------------------------------------------------------
+
+
+def _seed_graph_corpus(
+    store: VectorStore, embedder: Embedder
+) -> tuple[list[Document], list[list[float]]]:
+    """Build a 4-doc corpus with refs forming a small graph.
+
+        d1 -> d2 -> d3      (d4 isolated)
+
+    Returns the docs + embeddings for graph integration tests.
+    """
+    docs = [
+        _make_doc("d1", "技術記事", "RAG パイプライン全般の話"),
+        _make_doc("d2", "技術記事", "ベクトル検索のテクニック詳細"),
+        _make_doc("d3", "技術記事", "Chroma の永続化設定について"),
+        _make_doc("d4", "メモ", "週次ミーティングのメモ"),
+    ]
+    docs[0].refs = ["d2"]
+    docs[1].refs = ["d3"]
+    embeddings = embedder.embed_batch([d.body for d in docs])
+    store.upsert_many(docs, embeddings)
+    return docs, embeddings
+
+
+def _build_graph_from(docs: list[Document]):
+    from backend.src.graph import KnowledgeGraph
+
+    payload = [
+        {"id": d.id, "title": d.title, "axes": d.axes, "refs": d.refs} for d in docs
+    ]
+    return KnowledgeGraph.build_from_docs(payload)
+
+
+def test_search_with_graph_expand_adds_neighbors(
+    in_memory_store: VectorStore, dummy_embedder: Embedder
+) -> None:
+    """graph_expand=True should pull in 1-hop neighbours of the top hits."""
+    docs, _ = _seed_graph_corpus(in_memory_store, dummy_embedder)
+    graph = _build_graph_from(docs)
+    engine = SearchEngine(in_memory_store, dummy_embedder, graph=graph)
+
+    plain = engine.search("RAG", top_k=2, bm25_weight=0.0)
+    expanded = engine.search("RAG", top_k=2, bm25_weight=0.0, graph_expand=True)
+    # Expansion appends neighbours after the original results — at minimum,
+    # the count must not decrease, and ideally one of d1's neighbours (d2)
+    # surfaces when it would otherwise be cut.
+    assert len(expanded) >= len(plain)
+
+
+def test_search_graph_expand_dedupe(
+    in_memory_store: VectorStore, dummy_embedder: Embedder
+) -> None:
+    """Neighbours already present in the result set must not be duplicated."""
+    docs, _ = _seed_graph_corpus(in_memory_store, dummy_embedder)
+    graph = _build_graph_from(docs)
+    engine = SearchEngine(in_memory_store, dummy_embedder, graph=graph)
+    results = engine.search("RAG", top_k=10, bm25_weight=0.0, graph_expand=True)
+    ids = [r.id for r in results]
+    assert len(ids) == len(set(ids))
+
+
+def test_search_graph_expand_score_decay(
+    in_memory_store: VectorStore, dummy_embedder: Embedder
+) -> None:
+    """A neighbour pulled in via graph_expand has score = source × 0.7."""
+    from backend.src.search import SearchResult
+
+    docs, _ = _seed_graph_corpus(in_memory_store, dummy_embedder)
+    graph = _build_graph_from(docs)
+    engine = SearchEngine(in_memory_store, dummy_embedder, graph=graph)
+
+    seed = SearchResult(
+        id="d1", title="t", score=0.5, axes={}, body_snippet="",
+        path="/tmp/d1.md", refs=["d2"],
+    )
+    expanded = engine._expand_with_graph([seed], hop=1, max_neighbors=5)
+    neighbour = next((r for r in expanded if r.id == "d2"), None)
+    assert neighbour is not None
+    assert neighbour.score == pytest.approx(0.5 * 0.7)
+
+
+def test_search_no_graph_no_expand(
+    in_memory_store: VectorStore, dummy_embedder: Embedder, caplog: pytest.LogCaptureFixture
+) -> None:
+    """graph_expand=True with engine.graph=None is a warn-and-skip no-op."""
+    docs, _ = _seed_graph_corpus(in_memory_store, dummy_embedder)  # no graph wired
+    engine = SearchEngine(in_memory_store, dummy_embedder)
+    plain = engine.search("RAG", top_k=2, bm25_weight=0.0)
+    with caplog.at_level("WARNING", logger="backend.src.search"):
+        expanded = engine.search("RAG", top_k=2, bm25_weight=0.0, graph_expand=True)
+    assert [r.id for r in plain] == [r.id for r in expanded]
+    assert any("no KnowledgeGraph" in rec.message for rec in caplog.records)
+
+
+def test_search_graph_expand_max_neighbors(
+    in_memory_store: VectorStore, dummy_embedder: Embedder
+) -> None:
+    """max_neighbors caps the per-source neighbour expansion."""
+    from backend.src.search import SearchResult
+
+    docs = [
+        _make_doc("hub", "技術記事", "hub body"),
+        _make_doc("a", "技術記事", "a body"),
+        _make_doc("b", "技術記事", "b body"),
+        _make_doc("c", "技術記事", "c body"),
+    ]
+    docs[0].refs = ["a", "b", "c"]
+    embeddings = dummy_embedder.embed_batch([d.body for d in docs])
+    in_memory_store.upsert_many(docs, embeddings)
+    graph = _build_graph_from(docs)
+    engine = SearchEngine(in_memory_store, dummy_embedder, graph=graph)
+
+    seed = SearchResult(
+        id="hub", title="hub", score=0.5, axes={}, body_snippet="",
+        path="/tmp/hub.md", refs=docs[0].refs,
+    )
+    expanded = engine._expand_with_graph([seed], hop=1, max_neighbors=2)
+    neighbours_added = [r for r in expanded if r.id != "hub"]
+    assert len(neighbours_added) == 2

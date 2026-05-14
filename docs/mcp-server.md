@@ -373,6 +373,45 @@ ChromaDB を選定した理由は...
 
 ---
 
+### 3-7. `axis_neighbors`  (spec_040, v0.8)
+
+YAML frontmatter `refs:` から構築した knowledge graph 上で、ある doc_id の
+N hop 隣接ドキュメントを返す。`axis_search` で見つけた doc を起点に、関連する
+文献を follow-up で辿るのに使う。**ファイル書き込みなし** — 既存グラフを
+読むだけ。
+
+**Input schema:**
+
+| フィールド | 型 | デフォルト | 説明 |
+|---|---|---|---|
+| `doc_id` | `string` (1–128) | 必須 | 検索の中心となるドキュメント id |
+| `hop` | `int` (1–3) | `1` | BFS の深さ。1 は直接の refs のみ |
+| `max_neighbors` | `int` (1–100) | `20` | 隣接数の上限 |
+| `direction` | `"out" \| "in" \| "both"` | `"both"` | `out` = この doc の refs、`in` = この doc を参照している refs、`both` = 両方 |
+| `response_format` | `"markdown" \| "json"` | `"markdown"` | 出力形式 |
+
+**Markdown 出力サンプル:**
+
+```markdown
+# Neighbours of `doc_001` (hop=1)
+
+**center**: RAGアーキテクチャの設計判断
+- in_degree: 2, out_degree: 0
+
+## Neighbours (2)
+- `doc_002` — ベクトル検索の選定メモ (in=0, out=1)
+- `doc_004` — Claude Skills 入門 (in=0, out=2)
+```
+
+**Annotations:**
+
+- `readOnlyHint: true` / `destructiveHint: false` / `idempotentHint: true`
+  (グラフは起動時に固定) / `openWorldHint: false`
+
+設計詳細: [ADR-024](adr/ADR-024-graphrag-retrieval-expansion.md) / [ADR-025](adr/ADR-025-3d-graph-visualization.md)
+
+---
+
 ## 4. Error handling
 
 MCP tools never leak internal exception details to clients. On error:

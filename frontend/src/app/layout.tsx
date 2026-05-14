@@ -27,6 +27,9 @@ export default function RootLayout({
               <Link href="/chat" className="hover:underline">
                 💬 Chat
               </Link>
+              <Link href="/graph" className="hover:underline">
+                🕸️ Graph
+              </Link>
               <Link href="/settings" className="hover:underline">
                 設定
               </Link>

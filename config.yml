@@ -63,3 +63,18 @@ chat:
   rewriter:
     enabled: true             # false → skip rewrite, use original query
     model: "gemini-1.5-flash"
+
+# spec_040: GraphRAG + 3D Knowledge Graph (v0.8 marquee feature).
+# Builds a directed graph from frontmatter `refs:` at startup. Used for:
+#   - /api/graph endpoints (3D visualization on the frontend)
+#   - /api/search graph_expand=true (1-hop neighbour merge after BM25 fusion)
+#   - axis_neighbors MCP tool
+# `expand_on_search: false` keeps existing /api/search behaviour identical;
+# clients must explicitly opt in (graph_expand=true on the request) for the
+# expansion path to fire.
+graph:
+  enabled: true
+  default_hop: 1
+  max_neighbors_per_query: 20
+  expand_on_search: false
+  knowledge_dir: "./examples/knowledge"

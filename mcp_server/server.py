@@ -25,6 +25,7 @@ from backend.src.config import (
     settings,
 )
 from backend.src.embedder import Embedder
+from backend.src.graph import KnowledgeGraph, build_default_graph
 from backend.src.integrity import IntegrityChecker
 from backend.src.loader import load_directory
 from backend.src.normalizer import Normalizer
@@ -40,6 +41,8 @@ from mcp_server.formatters import (
     format_chat_json,
     format_chat_md,
     format_integrity_md,
+    format_neighbors_json,
+    format_neighbors_md,
     format_search_results_json,
     format_search_results_md,
 )
@@ -50,6 +53,7 @@ from mcp_server.schemas import (
     IngestInput,
     ListAxesInput,
     ListDocumentsInput,
+    NeighborsInput,
     ResponseFormat,
     SearchInput,
 )
@@ -79,6 +83,20 @@ mcp = FastMCP("axis_knowledge_rag_mcp")
 _engine: SearchEngine | None = None
 _rag: RAGPipeline | None = None
 _axes_cfg: dict | None = None
+_graph: KnowledgeGraph | None = None
+
+
+def _get_graph() -> KnowledgeGraph:
+    global _graph
+    if _graph is None:
+        app_cfg = load_app_config()
+        if not app_cfg.graph.enabled:
+            raise RuntimeError(
+                "knowledge graph disabled in config.yml (graph.enabled=false)"
+            )
+        _graph = build_default_graph(app_cfg.graph.knowledge_dir)
+        logger.info("KnowledgeGraph ready: %s", _graph.stats())
+    return _graph
 
 
 def _get_engine() -> SearchEngine:
@@ -465,6 +483,57 @@ async def axis_ingest_memo(params: IngestInput) -> str:
         return md
     except Exception as e:
         return make_error_response("axis_ingest_memo", e)
+
+
+# ============================================================================
+# Tool 7: axis_neighbors (spec_040)
+# ============================================================================
+@mcp.tool(
+    name="axis_neighbors",
+    annotations=ToolAnnotations(
+        title="Knowledge graph neighbours (refs)",
+        readOnlyHint=True,
+        destructiveHint=False,
+        idempotentHint=True,
+        openWorldHint=False,
+    ),
+)
+async def axis_neighbors(params: NeighborsInput) -> str:
+    """Return knowledge-graph neighbours of a doc_id within N hops.
+
+    Useful for follow-up exploration: after axis_search returns a doc, call
+    axis_neighbors with that ``doc_id`` to surface related documents the
+    YAML ``refs:`` chain connects to. Direction:
+    - ``out``: docs referenced *by* the input (this doc's refs)
+    - ``in``:  docs *referencing* the input (incoming refs)
+    - ``both`` (default): union of the two
+
+    Args:
+        params: see :class:`NeighborsInput`.
+
+    Returns:
+        Markdown (or JSON) summary of the center node + its neighbours.
+    """
+    try:
+        g = _get_graph()
+        center = g.get_node(params.doc_id)
+        if center is None:
+            return make_error_response(
+                "axis_neighbors", ValueError(f"doc_id {params.doc_id} not in graph")
+            )
+        neighbour_ids = g.neighbors_within_hop(
+            params.doc_id,
+            hop=params.hop,
+            max_neighbors=params.max_neighbors,
+            direction=params.direction,
+        )
+        neighbours = [g.get_node(nid) for nid in neighbour_ids]
+        neighbours = [n for n in neighbours if n is not None]
+        if params.response_format == ResponseFormat.JSON:
+            return format_neighbors_json(center, neighbours, params.hop)
+        return format_neighbors_md(center, neighbours, params.hop)
+    except Exception as e:
+        return make_error_response("axis_neighbors", e)
 
 
 def main() -> None:
