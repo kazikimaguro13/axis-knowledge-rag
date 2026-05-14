@@ -161,8 +161,11 @@ def main(argv: list[str]) -> int:
                 "refs": d.refs,
                 "path": str(d.path),
             }
+            # spec_043: chunk on the ORIGINAL body so parent.text / child.text
+            # preserve the user-facing text (NFKC + katakana→hiragana applied to
+            # the indexed body made search snippets unreadable in the demo).
             ps, cs = chunk_markdown(
-                d.id, d.normalized_body or d.body, fm,
+                d.id, d.body, fm,
                 max_child_tokens=pd.max_child_tokens,
             )
             parents_all.extend(ps)
@@ -172,7 +175,10 @@ def main(argv: list[str]) -> int:
             print("No child chunks produced from corpus.", file=sys.stderr)
             return 1
 
-        embeddings = embedder.embed_batch([c.text for c in children_all])
+        # Normalize only at embedding time — storage stays as the original text.
+        embeddings = embedder.embed_batch(
+            [normalizer(c.text) for c in children_all]
+        )
         store.add_chunks(parents_all, children_all, embeddings)
 
         print(
