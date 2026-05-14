@@ -26,6 +26,7 @@ YAML frontmatter 付き Markdown ナレッジに対する、**軸メタデータ
 - 💬 **Conversational RAG (履歴保持チャット)** — `/api/chat` で session_id を keep すれば follow-up 質問が成立。Gemini Flash で代名詞を含む質問を standalone クエリに自動 rewrite (v0.7, [ADR-018](docs/adr/ADR-018-conversational-rag.md))
 - 🔗 **In-Text Citation Highlighting** — 回答文中の `[N]` インライン引用マーカーをクリックすると対応する出典カードが黄色フラッシュ + scroll-into-view。Perplexity 風の UX を最小コストで実現 (v0.7, [ADR-020](docs/adr/ADR-020-citation-highlighting.md))
 - 🕐 **Time-Weighted Decay** (opt-in) — frontmatter の `updated` 日付を元に指数減衰係数を掛け、新しい文書を僅かに優遇。`config.yml` で `enabled: true` にすると有効 (v0.7, [ADR-021](docs/adr/ADR-021-time-weighted-decay.md))
+- 🕸️ **GraphRAG + 3D Visualization** — YAML `refs:` から構築した有向グラフで「検索でヒットした doc の隣接」を retrieval にマージ。Next.js `/graph` ページで react-force-graph-3d による 3D 力学シミュレーション付き (v0.8, [ADR-024](docs/adr/ADR-024-graphrag-retrieval-expansion.md) / [ADR-025](docs/adr/ADR-025-3d-graph-visualization.md))
 - 🇯🇵 **日本語ナレッジ特化** — 表記ゆれ吸収 (NFKC + カナ統一 + lowercase) 標準搭載
 - 🔌 **LangChain / LlamaIndex 不使用、自前実装** — 依存が薄く、内部挙動が読める。Embedder / VectorStore / RAG Pipeline を必要最小限の薄いラッパで構成
 - 🏠 **Local-first 設計** — ChromaDB はローカル永続、API キー未設定でも DUMMY モードで動作確認可能。個人ナレッジを外部送信しない
@@ -223,6 +224,9 @@ updated: 2026-05-12
 | `retrieval.time_decay` | `weight` | `0.15` | スコアに対する decay の影響割合 |
 | `retrieval.time_decay` | `date_field` | `"updated"` | frontmatter から参照する日付フィールド名 |
 | `rag` | `context_max_chars` | `8000` | RAG コンテキストの最大文字数 |
+| `graph` | `enabled` | `true` | `/api/graph` + 3D 可視化を有効化 (spec_040) |
+| `graph` | `expand_on_search` | `false` | `/api/search` で graph_expand を default true 化 |
+| `graph` | `max_neighbors_per_query` | `20` | `/api/graph/{id}/neighbors` の隣接上限 |
 
 Time-Weighted Decay を有効にするには:
 

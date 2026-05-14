@@ -179,7 +179,40 @@ Browser: localStorage に session_id を保存 → 次ターンで再投入
   global の `ConversationStore` (max 20 sessions / 1h TTL) を持つ。FastAPI 側と
   共有しないのが意図的設計
 
-### 3-3. Update time (AUTO_GENERATED ブロック再生成)
+### 3-3. Graph layer (spec_040, v0.8) — refs-driven knowledge graph
+
+`backend/src/graph.py` で、起動時に YAML frontmatter の `refs:` フィールドから
+**有向グラフ** (`networkx.DiGraph`) を 1 回だけ build する。これは
+
+- `SearchEngine.search(..., graph_expand=True)` の **1 hop 隣接マージ**
+  (上位 5 件 → 隣接 → score = 元 × 0.7)
+- FastAPI `GET /api/graph` / `/api/graph/{id}/neighbors` の **3D 描画用 JSON**
+- MCP `axis_neighbors` ツール
+
+の 3 経路から共有される。Broken refs / self-loops は warning + skip、循環参照は許容。
+
+```
+.md frontmatter (refs: ["doc_002", "doc_003"])
+        │   loader.py → Document.refs
+        ▼
+KnowledgeGraph.build_from_docs([{id, title, axes, refs}, ...])
+        │   networkx.DiGraph (in-memory, immutable after build)
+        ├─► /api/graph                ─► Next.js /graph  (react-force-graph-3d)
+        ├─► /api/graph/{id}/neighbors ─► GraphSidebar
+        ├─► /api/search graph_expand  ─► SearchEngine._expand_with_graph
+        └─► MCP axis_neighbors        ─► Claude Desktop からの follow-up
+```
+
+設計ポイント:
+
+- **`expand_on_search: false`** が default — 既存 `/api/search` の挙動は完全に互換。
+  クライアントが明示的に `graph_expand=true` を投げた時のみ拡張する
+- **1 hop / 上位 5 件のみ拡張**: ノード爆発を避けるため、seed は top 5、neighbour
+  は seed あたり `max_neighbors=10` まで。結果セットは最大 +50 件
+- **隣接スコア = 元 × 0.7**: 直接ヒットが常に隣接ヒットより上位に来ることを保証。
+  PageRank / centrality blend は spec_041 候補
+
+### 3-4. Update time (AUTO_GENERATED ブロック再生成)
 
 `marker.py` を介したナレッジ Markdown 自体の再生成:
 
