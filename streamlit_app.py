@@ -8,7 +8,9 @@ Requires the index to be built first:
 """
 
 import contextlib
+import html
 import os
+import re
 from typing import Any
 
 import requests
@@ -99,6 +101,91 @@ if st.sidebar.button("ChromaDB の件数を表示"):
     st.sidebar.info(f"格納済み: {engine._store.count()} 件")
 
 
+# ----- Citation rendering (spec_034) --------------------------------------
+
+_CITATION_RE = re.compile(r"\[(\d{1,3}(?:\s*,\s*\d{1,3})*)\]")
+
+
+def _render_answer_with_citations(answer_text: str, sources: list[Any]) -> None:
+    """Render an answer body with `[N]` markers turned into anchor links.
+
+    Uses CSS `:target` so clicking a `[N]` chip visually flashes the
+    matching source card without any JS / server round-trip. The source
+    list is rendered immediately after by the caller.
+    """
+    n_sources = len(sources)
+
+    def _to_links(m: re.Match[str]) -> str:
+        out: list[str] = []
+        for piece in m.group(1).split(","):
+            try:
+                n = int(piece.strip())
+            except ValueError:
+                continue
+            if 1 <= n <= n_sources:
+                out.append(f'<a class="axis-cite" href="#axis-src-{n}">[{n}]</a>')
+        return "".join(out)
+
+    body = _CITATION_RE.sub(_to_links, html.escape(answer_text))
+    st.markdown(
+        f"""
+        <style>
+          .axis-cite {{
+            color: #047857; text-decoration: none; font-weight: 600;
+            background: #d1fae5; padding: 0 4px; border-radius: 4px;
+            margin: 0 1px;
+          }}
+          .axis-cite:hover {{ background: #fde68a; }}
+          .axis-src {{
+            padding: 8px; border: 1px solid #e5e7eb; border-radius: 6px;
+            margin: 6px 0; transition: background 1s;
+          }}
+          .axis-src:target {{ background: #fef9c3; border-color: #facc15; }}
+        </style>
+        <div class="axis-answer" style="white-space:pre-wrap;line-height:1.6;">{body}</div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _src_attr(s: Any, key: str, default: Any = "") -> Any:
+    """Pull a field from a SearchResult dataclass *or* a plain dict."""
+    if isinstance(s, dict):
+        return s.get(key, default)
+    return getattr(s, key, default)
+
+
+def _render_sources_with_anchors(sources: list[Any], cited_ids: list[str]) -> None:
+    """Render the source cards with `id=axis-src-N` so `[N]` anchors can flash them."""
+    for i, r in enumerate(sources, 1):
+        title = html.escape(str(_src_attr(r, "title")))
+        rid = html.escape(str(_src_attr(r, "id")))
+        snippet = html.escape(str(_src_attr(r, "body_snippet")))
+        axes = _src_attr(r, "axes", {}) or {}
+        axes_str = html.escape(", ".join(f"{k}: {v}" for k, v in axes.items()))
+        score = float(_src_attr(r, "score", 0.0) or 0.0)
+        cited_badge = (
+            ' <span style="color:#047857;font-size:11px;">★ cited</span>'
+            if rid in cited_ids
+            else ""
+        )
+        st.markdown(
+            f"""
+            <article id="axis-src-{i}" class="axis-src">
+              <div style="display:flex;justify-content:space-between;align-items:baseline;">
+                <strong>[{i}] {title}</strong>{cited_badge}
+                <span style="color:#94a3b8;font-size:11px;">score {score:.3f}</span>
+              </div>
+              <div style="color:#64748b;font-size:11px;margin-top:2px;">
+                <code>{rid}</code> · {axes_str}
+              </div>
+              <p style="margin-top:6px;color:#374151;font-size:13px;">{snippet}</p>
+            </article>
+            """,
+            unsafe_allow_html=True,
+        )
+
+
 # ----- Tabs ---------------------------------------------------------------
 
 
@@ -111,24 +198,10 @@ def _search_tab() -> None:
         st.subheader("💡 回答")
         if ans.is_dummy:
             st.info("DUMMY モード (ANTHROPIC_API_KEY 未設定)")
-        st.markdown(ans.text)
+        _render_answer_with_citations(ans.text, ans.sources)
 
         st.subheader(f"📚 関連資料 ({len(ans.sources)} 件)")
-        for r in ans.sources:
-            cited = r.id in ans.cited_ids
-            with st.container(border=True):
-                cols = st.columns([4, 1])
-                with cols[0]:
-                    st.markdown(
-                        f"**{r.title}**  "
-                        f"`{r.id}`  "
-                        + (":green[★ cited]" if cited else "")
-                    )
-                    st.caption(f"axes: {r.axes}")
-                    st.write(r.body_snippet)
-                with cols[1]:
-                    st.metric("score", f"{r.score:.3f}")
-                    st.caption(r.path)
+        _render_sources_with_anchors(ans.sources, ans.cited_ids)
     else:
         st.info("左サイドバーで軸を絞り込み、上の入力欄に質問を入れてください。")
         st.markdown(
@@ -163,14 +236,16 @@ def _chat_tab() -> None:
         with st.chat_message(m["role"]):
             if m.get("rewritten_question"):
                 st.caption(f"🔁 rewritten: `{m['rewritten_question']}`")
-            st.markdown(m["content"])
-            if m.get("sources"):
+            if m["role"] == "assistant" and m.get("sources"):
+                # Render citations even in replayed history. The `:target`
+                # CSS state is per-page so re-renders still work — but the
+                # anchors only point to this turn's source list, so we
+                # render an expander with the same `axis-src-N` ids below.
+                _render_answer_with_citations(m["content"], m["sources"])
                 with st.expander(f"📚 出典 {len(m['sources'])} 件"):
-                    for s in m["sources"]:
-                        st.markdown(
-                            f"- **{s.get('title', '')}** `{s.get('id', '')}` "
-                            f"(score {s.get('score', 0):.3f})"
-                        )
+                    _render_sources_with_anchors(m["sources"], [])
+            else:
+                st.markdown(m["content"])
 
     if q := st.chat_input("質問を入力 (例: RAGの利点は?)"):
         st.session_state.chat_messages.append({"role": "user", "content": q})
@@ -197,7 +272,13 @@ def _chat_tab() -> None:
             st.session_state.chat_session_id = data["session_id"]
             if data.get("rewritten_question"):
                 st.caption(f"🔁 rewritten: `{data['rewritten_question']}`")
-            st.markdown(data["answer"])
+            sources = data.get("sources", [])
+            if sources:
+                _render_answer_with_citations(data["answer"], sources)
+                with st.expander(f"📚 出典 {len(sources)} 件", expanded=False):
+                    _render_sources_with_anchors(sources, data.get("cited_ids", []))
+            else:
+                st.markdown(data["answer"])
             st.session_state.chat_messages.append(
                 {
                     "role": "assistant",
