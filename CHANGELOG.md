@@ -2,6 +2,37 @@
 
 ## [Unreleased]
 
+### Day 43 (2026-05-14) — demo bugfix (spec_043)
+
+v0.8.1 リリース後の portfolio demo GIF 撮影中に発覚した 2 件の UX バグを修正
+(v0.8.2 patch release 候補)。
+
+- **GraphSidebar 視認性**: `bg-slate-50` (body と同色で「そこにある」のが分から
+  ない) → `bg-white` + `border-l-2 border-slate-200` + `shadow-sm` に変更。
+  初期状態のメッセージにアイコン (🕸️) と操作ガイド (ドラッグで回転、スクロー
+  ルでズーム) を追加 (frontend/src/components/GraphSidebar.tsx)
+- **検索 body の正規化テキスト混入**: `scripts/build_index.py` で chunker に
+  `d.normalized_body or d.body` を渡していたため、`parent.text` / `child.text`
+  が NFKC + カタカナ→ひらがな + lowercase 適用済みで ChromaDB に保存されてい
+  た (「ベクトル検索は…」が「べくとる検索は…」に化ける)。`d.body` (原文) を
+  chunker に渡すよう変更し、embedding 計算時のみ child 毎に `normalizer(c.text)`
+  を適用。検索結果の表示テキストが読みやすい原文に
+- **DUMMY 抜粋の smart truncate**: `backend/src/rag.py` の DUMMY 答え抜粋
+  `[:120]...` (中途切れ + 短すぎ) を `_smart_truncate(text, 200)` 経由に変更。
+  文末境界 (`。` / `.` / `!` / `?` / 空行) で切り、見つからなければハードカット。
+  suffix は `…` (U+2026) で見栄え向上
+- **既存 index 互換**: `VectorStore.load_parents()` に heuristic 判定を追加。
+  parents.db のサンプル text に hiragana はあるが katakana も uppercase ASCII
+  も無い場合 warning ログを出し、`--rebuild` を推奨 (auto rebuild は data loss
+  回避のため行わない)
+- backend/tests/test_rag.py: `_smart_truncate` 5 件 (空文字 / 短文 passthrough
+  / JP 句点境界 / EN period 境界 / 境界無し hard cut) + DUMMY snippet integration
+  1 件 = **6 件追加** (17 → 23)
+- docs/design-decisions.md: ADR-007 に Update (spec_043) 節を追加 — 「normalize は
+  embedding only、storage は原文」方針を明示
+- 既存 352 tests + 新規 6 件 = **358 件 PASS** (1 skipped: redis 未インストール)、
+  ruff 緑
+
 ### Day 42 (2026-05-14) — v0.8 review fixes (spec_041 HIGH/MID/LOW 5 件解消) (spec_042)
 
 spec_041 のレビューで指摘された 5 件 (HIGH 1 + MID 2 + LOW 2) を一括解消。
