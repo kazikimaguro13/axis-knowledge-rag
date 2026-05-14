@@ -507,6 +507,13 @@ class RedisStore:
         return bool(r.exists(self._meta_key(session_id)))
 
     def __len__(self) -> int:
+        """Return active session count.
+
+        Note: uses ``SCAN_ITER`` over all meta keys, which is **O(K)** where K
+        is the number of keys in Redis. Avoid on hot paths in large
+        deployments (multi-host / millions of keys) — prefer external admin
+        tooling for capacity monitoring (spec_042 LOW #4).
+        """
         r = self._require_client()
         count = 0
         for _ in r.scan_iter(f"{self.META_PREFIX}:*:meta"):

@@ -94,3 +94,37 @@ v0.8 リリース時点では **CI に組み込まない** — 1 週間 nightly 
 ### コスト追記
 
 A/B 1 回で **judge call 200 回** (25 × 4 metrics × 2 config) → ~$0.10/run。月 1 回想定で +$0.10/月。
+
+## Update (2026-05-14, spec_042) — EVAL_OVERRIDE_FLAG wiring
+
+spec_038 では `run_abtest.py` が `os.environ["EVAL_OVERRIDE_FLAG"]` を set していたが、`load_app_config()` がこの環境変数を読み取らない実装漏れがあり、A/B 両 run が同一 config で走っていた (spec_041 review で HIGH 指摘)。
+
+### 修正
+
+`load_app_config()` を 2 段構成にリファクタ:
+
+1. yaml → typed `AppConfig` (`_build_app_config`)
+2. `EVAL_OVERRIDE_FLAG` 環境変数があれば dotted-key=value で in-memory override (`_apply_override_flags`)
+
+複数 key は `;` 区切り。
+
+```
+EVAL_OVERRIDE_FLAG="retrieval.time_decay.enabled=true;chat.enabled=false"
+```
+
+### 型強制 (_coerce_value)
+
+| 入力 | 型 |
+|---|---|
+| `"true"` / `"false"` (case-insensitive) | `bool` |
+| 整数表現 | `int` |
+| 浮動小数表現 | `float` |
+| それ以外 | `str` |
+
+### Unknown key
+
+`AppConfig` に存在しないキーは `WARNING` ログ + skip。本番稼働中に古い env var が残っていても API が落ちないようにする (silent fail を採用)。
+
+### 影響
+
+`evaluation/run_abtest.py` のコード側に変更なし。同じ環境変数を set している既存呼び出しが **意味的に initial 動作するようになる**。
