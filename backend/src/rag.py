@@ -128,6 +128,27 @@ def build_context(
     return "".join(out)
 
 
+def _smart_truncate(text: str, max_chars: int = 200) -> str:
+    """Truncate at the nearest sentence boundary at or before ``max_chars``.
+
+    Looks for 。 / . / ! / ? / blank-line in the last 30% of the window and
+    cuts there; falls back to a hard slice + "…" when no boundary is found.
+    Returns text unchanged when it fits within ``max_chars``.
+    """
+    if not text:
+        return ""
+    if len(text) <= max_chars:
+        return text
+    window_start = int(max_chars * 0.7)
+    candidate = text[window_start:max_chars]
+    for marker in ("。\n", "。", ".\n", ". ", "!\n", "! ", "?\n", "? ", "\n\n"):
+        idx = candidate.rfind(marker)
+        if idx >= 0:
+            cut = window_start + idx + len(marker.rstrip())
+            return text[:cut] + "…"
+    return text[:max_chars] + "…"
+
+
 def _dummy_answer(question: str, results: list[SearchResult]) -> Answer:
     """Generate a deterministic offline answer for dev / CI."""
     if not results:
@@ -138,10 +159,11 @@ def _dummy_answer(question: str, results: list[SearchResult]) -> Answer:
             is_dummy=True,
         )
     cited = [results[0].id]
+    snippet = _smart_truncate(results[0].body_snippet, max_chars=200)
     text = (
         f"[DUMMY ANSWER] 質問「{question}」に対し、"
         f"資料「{results[0].title}」が最も関連しています[1]。"
-        f" 抜粋: {results[0].body_snippet[:120]}..."
+        f" 抜粋: {snippet}"
     )
     return Answer(
         text=text, sources=results, cited_ids=cited, is_dummy=True, model="dummy"

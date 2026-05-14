@@ -237,6 +237,78 @@ def test_answer_canonicalises_csv_marker(rag_pipeline: RAGPipeline) -> None:
     assert set(ans.cited_ids) == {ans.sources[0].id, ans.sources[1].id}
 
 
+# ---------------------------------------------------------------------------
+# spec_043: _smart_truncate + DUMMY snippet integration
+# ---------------------------------------------------------------------------
+
+
+def test_smart_truncate_empty() -> None:
+    from backend.src.rag import _smart_truncate
+
+    assert _smart_truncate("") == ""
+
+
+def test_smart_truncate_short_passthrough() -> None:
+    from backend.src.rag import _smart_truncate
+
+    assert _smart_truncate("短い文", max_chars=200) == "短い文"
+
+
+def test_smart_truncate_japanese_sentence_boundary() -> None:
+    from backend.src.rag import _smart_truncate
+
+    text = "RAG は検索と生成の組み合わせ。" * 20
+    out = _smart_truncate(text, max_chars=100)
+    assert out.endswith("…")
+    assert "。" in out
+    # Cut should land on or before max_chars + 1 char for the ellipsis.
+    assert len(out) <= 105
+    # Boundary must be the 。 — last char before ellipsis is the period.
+    assert out[-2] == "。"
+
+
+def test_smart_truncate_english_period() -> None:
+    from backend.src.rag import _smart_truncate
+
+    text = "RAG combines retrieval and generation. " * 20
+    out = _smart_truncate(text, max_chars=100)
+    assert out.endswith("…")
+    assert "." in out
+    assert len(out) <= 105
+
+
+def test_smart_truncate_no_boundary_hard_cut() -> None:
+    from backend.src.rag import _smart_truncate
+
+    text = "あ" * 500  # no sentence markers
+    out = _smart_truncate(text, max_chars=100)
+    assert out.endswith("…")
+    assert len(out) == 101  # 100 chars + ellipsis
+
+
+def test_dummy_answer_smart_truncates_long_snippet() -> None:
+    """spec_043: DUMMY抜粋 uses _smart_truncate (sentence boundary + …)."""
+    from backend.src.rag import _dummy_answer
+    from backend.src.search import SearchResult
+
+    long_body = "RAG は検索と生成の組み合わせ。" * 30
+    r = SearchResult(
+        id="doc_test",
+        title="Test Doc",
+        score=0.9,
+        axes={},
+        body_snippet=long_body,
+        path="test.md",
+        refs=[],
+    )
+    ans = _dummy_answer("テスト質問", [r])
+    assert ans.is_dummy is True
+    assert "[DUMMY ANSWER]" in ans.text
+    # Suffix must be the U+2026 ellipsis from smart truncate, not "..."
+    assert "…" in ans.text
+    assert "..." not in ans.text
+
+
 def test_build_context_respects_max_chars_budget() -> None:
     from backend.src.rag import build_context
     from backend.src.search import SearchResult
