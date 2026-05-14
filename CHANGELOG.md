@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+### Day 33 (2026-05-14) — RAGAS CI/CD (LLM-as-a-Judge 自動評価) (spec_033)
+
+- evaluation/__init__.py: 新規。evaluation パッケージ初期化
+- evaluation/datasets/qa_v1.json: 新規。25 件 QA データセット (定義 5 / 比較 5 / Why 5 / How 5 / エッジ 5)、examples/knowledge/01-05.md をカバー
+- evaluation/judge.py: 新規。Gemini 1.5 Flash LangChain wrapper。`get_judge_llm()` / `get_judge_embeddings()` を公開
+- evaluation/run_ragas.py: 新規。RAGAS 評価ランナー。`--dataset` / `--baseline` / `--output` / `--update-baseline` / `--regression-threshold` オプション。v0.7 は WARN only (exit 0)
+- evaluation/baseline.json: 新規。bootstrap 値 (0.0)。nightly CI が実スコアで更新
+- evaluation/requirements.txt: 新規。ragas>=0.2.0 / datasets>=2.20 / langchain-google-genai>=2.0 / langchain-core>=0.3
+- evaluation/README.md: 新規。使い方 / メトリクス解説 / CI 説明
+- .github/workflows/ragas.yml: 新規。nightly (03:00 JST) + PR トリガー (backend/evaluation/config.yml 変更時)。PR コメントでスコア diff 表示、nightly は baseline 自動更新
+- Makefile: 新規。`make eval` / `make eval-update-baseline` / `make lint` / `make test`
+- pyproject.toml: `[project.optional-dependencies]` に `eval` セクション追加 (ragas/datasets/langchain-google-genai/langchain-core)、packages.find に evaluation* 追加
+- docs/adr/ADR-019-ragas-evaluation.md: 新規。judge 選定理由 (Gemini Flash)、コスト見積もり ($1.5/月)、代替案との比較
+- docs/evaluation.md: 新規。データセット仕様、メトリクス解説、コスト、将来拡張
+- README.md: RAGAS バッジ追加、Evaluation セクション追加、Version バッジを 0.7.0 に更新
+
 ### Day 31 (2026-05-14) — Parent Document Retrieval (Small-to-Big) (spec_031)
 
 - backend/src/chunker.py: 新規。Markdown 本文を ParentChunk (H2 単位 / H2 が無ければ doc 全体) と ChildChunk (~256 token; H3+/段落/文末で分割) に純粋関数で分割。LangChain 不使用、`re` + `unicodedata` のみ

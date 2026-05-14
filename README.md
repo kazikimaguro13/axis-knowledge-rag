@@ -5,12 +5,13 @@
 YAML frontmatter 付き Markdown ナレッジに対する、**軸メタデータ検索 + ベクトル検索 + RAG** のローカル Web アプリ OSS。
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/Version-0.6.0-brightgreen.svg)](#ロードマップ)
+[![Version](https://img.shields.io/badge/Version-0.7.0-brightgreen.svg)](#ロードマップ)
 [![Python: 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://www.python.org/)
 [![Next.js](https://img.shields.io/badge/Next.js-14-black.svg)](https://nextjs.org/)
-[![Status: v0.5 A grade](https://img.shields.io/badge/Status-v0.6--BM25--hybrid-brightgreen.svg)](#ロードマップ)
+[![Status: v0.7 RAGAS-CI](https://img.shields.io/badge/Status-v0.7--RAGAS--CI-brightgreen.svg)](#ロードマップ)
 [![CI](https://github.com/kazikimaguro13/axis-knowledge-rag/actions/workflows/ci.yml/badge.svg)](https://github.com/kazikimaguro13/axis-knowledge-rag/actions/workflows/ci.yml)
 [![Docker Build](https://github.com/kazikimaguro13/axis-knowledge-rag/actions/workflows/docker.yml/badge.svg)](https://github.com/kazikimaguro13/axis-knowledge-rag/actions/workflows/docker.yml)
+[![RAGAS](https://img.shields.io/badge/RAGAS-baseline%20v0.7-blue.svg)](evaluation/baseline.json)
 
 ---
 
@@ -249,6 +250,30 @@ updated: 2026-05-12
 | [Documentation Index](docs/INDEX.md) | `docs/` 全体の目次 |
 
 機能ごとの詳細: [normalizer](docs/normalizer.md) / [integrity](docs/integrity.md) / [marker](docs/marker.md)
+
+---
+
+## 📊 Evaluation
+
+本リポジトリは [RAGAS](https://docs.ragas.io/) を使って **検索 + 生成品質を自動評価** しています。
+
+| メトリクス | 説明 |
+|---|---|
+| faithfulness | 生成回答が retrieved context に忠実か |
+| answer_relevancy | 質問に対する回答の妥当性 |
+| context_precision | 取得した context のうち真に必要な割合 |
+| context_recall | 正答を裏付ける context を取得できた割合 |
+
+ローカル実行:
+
+```bash
+pip install -e ".[eval]"
+make eval
+```
+
+CI でも毎日 03:00 JST に実行、PR で関連ファイルが変更されると自動でスコアをコメント (`.github/workflows/ragas.yml`)。
+
+詳細: [`docs/evaluation.md`](docs/evaluation.md) / [`docs/adr/ADR-019-ragas-evaluation.md`](docs/adr/ADR-019-ragas-evaluation.md)
 
 ---
 
