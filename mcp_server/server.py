@@ -198,7 +198,8 @@ async def axis_answer(params: AnswerInput) -> str:
     """Generate an answer to a question, grounded in the knowledge base.
 
     Uses Claude API to compose a citation-bearing response from the top-k
-    retrieved Documents. Citation format in the body: [doc_NNN].
+    retrieved Documents. Citation format in the body: [N] (1-indexed,
+    matching the position of the source in the `sources` list).
 
     Args:
         params (AnswerInput): {

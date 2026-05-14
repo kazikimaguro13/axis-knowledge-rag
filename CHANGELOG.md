@@ -2,6 +2,25 @@
 
 ## [Unreleased]
 
+### Day 34 (2026-05-14) — In-Text Citation Highlighting (spec_034)
+
+- backend/src/_citations.py: 新規。`parse_and_validate_citations()` / `extract_citations()` の 2 関数。`[N]` (1-indexed) インライン引用マーカーをパースし、`[1, 2]` を `[1][2]` に正規化、out-of-range な N (`N > len(sources)`) は silently strip + warning ログ。新規依存 0
+- backend/src/rag.py: `SYSTEM_PROMPT` / `CHAT_SYSTEM_PROMPT` の引用ルールを `[doc_NNN]` から `[N]` (1 始まり) に変更。`answer()` / `_generate_chat_answer()` で Claude の生レスポンスを `parse_and_validate_citations()` に通し、`cited_ids` を `sources[N-1].id` のリストとして公開 (API 互換性は維持)。`CITATION_RE` を削除、`re` import も削除
+- backend/src/rag.py: `_dummy_answer()` の出力フォーマットを `[doc_NNN]` から `[1]` に変更
+- backend/tests/test_citations.py: 新規 13 件 — single / consecutive / `[1, 2]` 正規化 / out-of-range strip / partial-invalid / zero-index / 全 invalid / `n_sources=0` / offset 抽出
+- backend/tests/test_rag.py: 新規 3 件 — Claude モック経由で `[N]` → source ID マッピング / out-of-range strip / `[1, 2]` 正規化を確認
+- frontend/src/lib/citations.ts: 新規。`parseCitations(text)` が `{kind: "text" | "citation", n}` のセグメント列を返す。バックエンドと対称な regex
+- frontend/src/components/AnswerPanel.tsx: `[N]` を `<button>` として描画、クリックで対応 source の `<ResultCard>` を `scrollIntoView` + 黄色フラッシュ。`sources` / `onCitationFocus` prop を追加
+- frontend/src/components/ResultCard.tsx: `n` (1-based index) / `highlighted` prop を追加。`highlighted=true` で黄色背景 + `data-highlighted` 属性 (テスト用)。`[N]` チップをタイトル左に表示
+- frontend/src/components/ChatMessage.tsx: `[doc_NNN]` regex を削除、`parseCitations()` で `[N]` をボタン化。クリックで自動的に "📚 出典" expander を開き、該当 li を黄色フラッシュ
+- frontend/src/app/page.tsx: `highlightedId` state を持ち、`AnswerPanel.onCitationFocus` 経由で対応 `ResultCard` に flash を渡す
+- streamlit_app.py: `_render_answer_with_citations()` / `_render_sources_with_anchors()` を追加。`[N]` を `<a href="#axis-src-N">` に変換、CSS `:target` でアンカー遷移時に該当カードを黄色背景化。JS なし・サーバラウンドトリップなしで動作。Search タブ / Chat タブ両方で使用
+- docs/adr/ADR-020-citation-highlighting.md: 新規 ADR — Context (どの文がどの出典か不明) / Decision (`[N]` plain-text marker) / Alternatives (a-d) / Consequences (LLM 遵守率, code fence 内偽陽性)
+- docs/api-reference.md: `/api/answer` / `/api/chat` のレスポンス例を `[doc_NNN]` から `[N]` に書き換え、`cited_ids` の生成ルール / out-of-range strip の挙動を追記
+- README.md: ✨ 特徴 に「🔗 In-Text Citation Highlighting」行を追加
+- 既存 API 互換: `text` / `cited_ids` / `sources` のフィールド構造は変更なし。`cited_ids` は引き続き doc-NNN-style ID のリスト
+- MCP / 平文クライアント: `[1]` `[2]` がそのまま表示されるが、脚注として自然に読める (ADR-020 alternatives 参照)
+
 ### Day 35 (2026-05-14) — Time-Weighted Decay (spec_035)
 
 - backend/src/_decay.py: 新規。`decay_factor()` / `blend_score()` / `_parse_datetime()` の 3 純粋関数。副作用なし・新規依存なし (math.exp のみ)。ISO 8601 文字列・datetime 両対応。パース失敗 / `updated` 不在 / 未来日付はすべて decay=1.0 (ペナルティなし)
