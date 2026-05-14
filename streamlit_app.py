@@ -289,8 +289,93 @@ def _chat_tab() -> None:
             )
 
 
-tab_search, tab_chat = st.tabs(["🔎 Search", "💬 Chat"])
+def _graph_tab() -> None:
+    """Lightweight 2D graph view backed by /api/graph + matplotlib.
+
+    The main 3D experience lives in the Next.js /graph route; this tab
+    is a fallback for Streamlit-only users (and useful for quick stats).
+    """
+    st.subheader("🕸️ Knowledge Graph")
+    st.caption(
+        f"バックエンド `{API_BASE}/api/graph` の payload を 2D で描画します。"
+        " 3D 版は Next.js `/graph` ページへ。"
+    )
+    category = st.selectbox(
+        "category フィルタ",
+        options=["(指定なし)", "技術記事", "メモ", "議事録", "ToDo"],
+        index=0,
+        key="graph_filter_category",
+    )
+    params: dict[str, Any] = {"limit": 500}
+    if category != "(指定なし)":
+        params["axes_category"] = category
+    try:
+        data = requests.get(f"{API_BASE}/api/graph", params=params, timeout=30).json()
+    except Exception as e:
+        st.error(f"graph 取得失敗: {e}")
+        return
+
+    if "stats" not in data:
+        st.error(f"unexpected response: {data}")
+        return
+    stats = data["stats"]
+    st.write(
+        f"**{stats['nodes']} nodes / {stats['edges']} edges**"
+        f" (isolated={stats['isolated']},"
+        f" components={stats['weakly_connected_components']})"
+    )
+
+    try:
+        import matplotlib.pyplot as plt
+        import networkx as nx
+    except ImportError:
+        st.warning(
+            "matplotlib / networkx が見つかりません。`pip install matplotlib` で導入してください。"
+        )
+        return
+
+    g = nx.DiGraph()
+    for n in data["nodes"]:
+        g.add_node(
+            n["id"],
+            title=n.get("title", ""),
+            category=str(n.get("axes", {}).get("category", "")),
+        )
+    for e in data["edges"]:
+        g.add_edge(e["source"], e["target"])
+
+    if g.number_of_nodes() == 0:
+        st.info("条件に一致するノードがありません。")
+        return
+
+    color_map = {
+        "技術記事": "#3b82f6",
+        "メモ": "#a855f7",
+        "議事録": "#22c55e",
+        "ToDo": "#f97316",
+    }
+    colors = [color_map.get(g.nodes[n].get("category", ""), "#9ca3af") for n in g.nodes()]
+    fig, ax = plt.subplots(figsize=(10, 7))
+    pos = nx.spring_layout(g, k=0.6, iterations=30, seed=42)
+    nx.draw(
+        g,
+        pos,
+        ax=ax,
+        node_color=colors,
+        node_size=240,
+        with_labels=True,
+        font_size=7,
+        arrows=True,
+        edge_color="#9ca3af",
+        alpha=0.85,
+    )
+    st.pyplot(fig)
+
+
+tab_search, tab_chat, tab_graph = st.tabs(["🔎 Search", "💬 Chat", "🕸️ Graph"])
 with tab_search:
     _search_tab()
 with tab_chat:
     _chat_tab()
+with tab_graph:
+    _graph_tab()
