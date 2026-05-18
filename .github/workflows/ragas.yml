@@ -13,6 +13,9 @@ on:
       - "config.yml"
   workflow_dispatch:
 
+permissions:
+  contents: write   # spec_043 hotfix: nightly baseline-update step needs to push back to main
+
 jobs:
   ragas:
     runs-on: ubuntu-latest
@@ -21,6 +24,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          # Use the GITHUB_TOKEN explicitly so the later git push uses the permission above.
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: actions/setup-python@v5
         with:
