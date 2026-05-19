@@ -48,46 +48,79 @@ def _format_history(history: list[Message]) -> str:
     return "\n".join(f"{m.role}: {m.content[:200]}" for m in history[-6:])
 
 
+def _clean_rewritten(rewritten: str) -> str:
+    """Strip a leading prefix the model may have leaked back."""
+    for prefix in ("書き換え後の質問:", "Rewritten question:", "Q:"):
+        if rewritten.startswith(prefix):
+            rewritten = rewritten[len(prefix):].strip()
+    return rewritten
+
+
+def _rewrite_with_ollama(prompt: str, model_name: str, url: str) -> str:
+    """spec_045: call an Ollama chat model for the rewrite."""
+    import ollama
+
+    client = ollama.Client(host=url)
+    resp = client.chat(
+        model=model_name,
+        messages=[{"role": "user", "content": prompt}],
+        options={"temperature": 0.0, "num_predict": 200},
+    )
+    return (resp["message"]["content"] or "").strip()
+
+
+def _rewrite_with_gemini(prompt: str, model_name: str) -> str:
+    import google.generativeai as genai
+
+    genai.configure(api_key=settings.gemini_api_key)
+    model = genai.GenerativeModel(model_name)
+    resp = model.generate_content(
+        prompt,
+        generation_config={"temperature": 0.0, "max_output_tokens": 200},
+    )
+    return (getattr(resp, "text", "") or "").strip()
+
+
 def rewrite_question(
     question: str,
     history: list[Message],
     *,
     model_name: str = DEFAULT_MODEL,
     enabled: bool = True,
+    backend: str = "gemini",
+    ollama_url: str = "http://localhost:11434",
 ) -> str:
     """Rewrite ``question`` into a standalone query using chat history.
 
+    spec_045 added ``backend`` so the rewriter can run fully on-prem via
+    Ollama. ``backend="gemini"`` (default) keeps v0.8.1 behaviour exactly.
+
     Returns the original ``question`` unchanged when:
-    - ``enabled=False``
-    - ``history`` is empty
-    - ``GEMINI_API_KEY`` is not configured
-    - Gemini call raises any exception
-    - the model returns an empty / oversized (>500 chars) response
+    - ``enabled=False`` / ``history`` is empty / ``question`` is blank
+    - the chosen backend isn't configured (no GEMINI_API_KEY for gemini,
+      no ``ollama`` package / unreachable server for ollama)
+    - the model call raises
+    - the response is empty or >500 chars (likely a hallucination)
     """
     if not enabled or not history or not question.strip():
         return question
-    if not settings.gemini_api_key:
-        return question
+    prompt = REWRITE_PROMPT.format(
+        history=_format_history(history),
+        question=question,
+    )
+    backend_l = (backend or "gemini").lower()
     try:
-        import google.generativeai as genai
-
-        genai.configure(api_key=settings.gemini_api_key)
-        model = genai.GenerativeModel(model_name)
-        resp = model.generate_content(
-            REWRITE_PROMPT.format(
-                history=_format_history(history),
-                question=question,
-            ),
-            generation_config={"temperature": 0.0, "max_output_tokens": 200},
-        )
-        rewritten = (getattr(resp, "text", "") or "").strip()
-        if not rewritten or len(rewritten) > MAX_REWRITE_LEN:
-            return question
-        # Strip a leading "書き換え後の質問:" prefix if the model leaks it
-        for prefix in ("書き換え後の質問:", "Rewritten question:", "Q:"):
-            if rewritten.startswith(prefix):
-                rewritten = rewritten[len(prefix):].strip()
-        return rewritten or question
+        if backend_l == "ollama":
+            rewritten = _rewrite_with_ollama(prompt, model_name, ollama_url)
+        else:
+            if not settings.gemini_api_key:
+                return question
+            rewritten = _rewrite_with_gemini(prompt, model_name)
     except Exception as e:  # noqa: BLE001 — fall back on any failure
         logger.warning("question rewriter failed, using original query: %s", e)
         return question
+
+    if not rewritten or len(rewritten) > MAX_REWRITE_LEN:
+        return question
+    rewritten = _clean_rewritten(rewritten)
+    return rewritten or question
