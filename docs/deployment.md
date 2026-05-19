@@ -304,6 +304,67 @@ is the v0.7 behaviour.
 
 ---
 
+## Fully On-Prem with Ollama (spec_045)
+
+v0.9.0 added an Ollama-backed path for **embedding + generation** so the
+RAG pipeline can run with zero outbound traffic. Suitable for in-house
+deployments where docs cannot leave the network.
+
+### One-time setup
+
+```bash
+# 1. Install the optional Python client (host side)
+pip install -e ".[ollama]"
+
+# 2. Bring up the Ollama daemon (off by default — gated by profile)
+docker compose --profile ollama up -d ollama
+
+# 3. Pull the models. bge-m3 = embedder (1024-dim multilingual JP/EN);
+#    llama3 / qwen2.5 / etc = generator. First pull is multi-GB; subsequent
+#    starts are instant.
+docker exec axis-ollama ollama pull bge-m3
+docker exec axis-ollama ollama pull llama3        # try llama3:70b for quality
+
+# 4. Flip backends in config.yml
+#    embedder.backend: "ollama"
+#    generation.backend: "ollama"
+
+# 5. Rebuild the index — bge-m3 (1024) and Gemini (768) are dim-incompatible,
+#    so an existing ChromaDB built against Gemini cannot read Ollama vectors.
+PYTHONPATH=. python3 -m scripts.build_index ./examples/knowledge --rebuild
+
+# 6. Restart the backend
+docker compose restart backend
+```
+
+### Choosing a model
+
+| Use case | Recommended `generation.ollama.model` | Notes |
+|---|---|---|
+| CPU-only laptop | `llama3` (8B) | ~5 s per answer, parity well below Claude on JP |
+| 1× consumer GPU (24GB) | `qwen2.5:14b` or `llama3:8b-instruct-q8_0` | Best mid-tier |
+| Workstation (≥ 48GB VRAM) | `llama3:70b` or `qwen2.5:32b` | Approaches Claude for short, citation-heavy answers |
+
+`bge-m3` is the default embedder (1024-dim, multilingual including JP).
+Swap for `nomic-embed-text` (768-dim, English-only) if you want to keep
+the Gemini-compatible dimensionality and only switch the generator.
+
+### Health-check
+
+```bash
+# Should report embedder_mode=OLLAMA, rag_mode=OLLAMA
+curl -s http://localhost:8000/api/health | jq
+```
+
+### Disabling Ollama
+
+Set `embedder.backend` back to `"gemini"` (or `"dummy"`) and
+`generation.backend` to `"claude"` (or `"dummy"`), rebuild the index if
+the embedder changed, and restart. The optional `[ollama]` extra can stay
+installed — the factory short-circuits when `backend != "ollama"`.
+
+---
+
 ## CI / CD (GitHub Actions)
 
 現在の CI 構成:
