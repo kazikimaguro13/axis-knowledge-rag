@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from backend.src.embedder import Embedder
+from backend.src.embedder import DummyEmbedder
 from backend.src.loader import Document
 from backend.src.normalizer import Normalizer
 from backend.src.search import SearchEngine
@@ -54,7 +54,7 @@ def tmp_chroma(tmp_path: Path, monkeypatch):
 def populated_engine(tmp_chroma: Path) -> SearchEngine:
     """Return a SearchEngine pre-populated with 6 sample docs."""
     store = VectorStore(path=tmp_chroma / "chroma")
-    embedder = Embedder(force_dummy=True)
+    embedder = DummyEmbedder()
     normalizer = Normalizer.from_config({"axes": []})
     engine = SearchEngine(store, embedder, normalizer)
 
@@ -326,7 +326,7 @@ async def test_axis_list_documents_filters(populated_engine):
 def large_engine(tmp_chroma: Path) -> SearchEngine:
     """Engine pre-populated with 250 docs to exercise the no-cap pagination."""
     store = VectorStore(path=tmp_chroma / "chroma")
-    embedder = Embedder(force_dummy=True)
+    embedder = DummyEmbedder()
     normalizer = Normalizer.from_config({"axes": []})
     engine = SearchEngine(store, embedder, normalizer)
 

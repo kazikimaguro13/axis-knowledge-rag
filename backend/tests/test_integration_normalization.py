@@ -9,7 +9,7 @@ Run via: python -m backend.tests.test_integration_normalization
 import sys
 from pathlib import Path
 
-from backend.src.embedder import Embedder
+from backend.src.embedder import DummyEmbedder
 from backend.src.loader import Document
 from backend.src.normalizer import Normalizer
 from backend.src.search import SearchEngine
@@ -47,7 +47,7 @@ def _setup() -> tuple[VectorStore, SearchEngine, Normalizer]:
     normalizer = Normalizer()
     store = VectorStore(in_memory=True)
     store.reset()  # Chroma EphemeralClient はプロセス内で state を共有するため毎回 reset
-    embedder = Embedder(force_dummy=True)
+    embedder = DummyEmbedder()
     docs = [
         _make_doc("d1", "RAG入門", "RAGとはRetrieval-Augmented Generationの略です。",
                   category="技術記事", tags=["RAG", "検索"], normalizer=normalizer),
@@ -95,7 +95,7 @@ def test_zenkaku_filter_matches_normalized_axis() -> None:
     normalizer = Normalizer()
     store = VectorStore(in_memory=True)
     store.reset()
-    embedder = Embedder(force_dummy=True)
+    embedder = DummyEmbedder()
     docs = [
         _make_doc("a", "x", "x", category="TechNote", normalizer=normalizer),
         _make_doc("b", "y", "y", category="メモ", normalizer=normalizer),
@@ -128,7 +128,7 @@ def test_norm_metadata_stored_alongside_raw() -> None:
     normalizer = Normalizer()
     store = VectorStore(in_memory=True)
     store.reset()
-    embedder = Embedder(force_dummy=True)
+    embedder = DummyEmbedder()
     doc = _make_doc("z", "ＲＡＧ", "ＲＡＧ", category="技術記事", normalizer=normalizer)
     store.upsert(doc, embedder.embed(doc.normalized_body))
     raw = store.query(embedding=embedder.embed("dummy"), n_results=1)
