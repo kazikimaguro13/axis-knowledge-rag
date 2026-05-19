@@ -49,6 +49,9 @@ eval = [
 redis = [
     "redis>=5.0,<6",
 ]
+ollama = [
+    "ollama>=0.3",
+]
 
 [project.scripts]
 axis-knowledge-rag-mcp = "mcp_server.server:main"

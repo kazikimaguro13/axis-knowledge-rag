@@ -44,6 +44,22 @@ services:
       --appendonly yes
       --maxmemory-policy allkeys-lru
 
+  # spec_045: optional Ollama backend for fully on-prem embedding +
+  # generation. Off by default; activate with
+  # `docker compose --profile ollama up -d ollama`, pull models with
+  # `docker exec axis-ollama ollama pull bge-m3 && ... pull llama3`,
+  # then flip config.yml > {embedder,generation}.backend to "ollama".
+  ollama:
+    image: ollama/ollama:latest
+    container_name: axis-ollama
+    profiles: ["ollama"]
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    restart: unless-stopped
+
 volumes:
   chroma-data:
   redis-data:
+  ollama-data:

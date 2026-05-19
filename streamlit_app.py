@@ -16,8 +16,13 @@ from typing import Any
 import requests
 import streamlit as st
 
-from backend.src.config import configure_logging, load_axes_config, settings
-from backend.src.embedder import Embedder
+from backend.src.config import (
+    configure_logging,
+    load_app_config,
+    load_axes_config,
+    settings,
+)
+from backend.src.embedder import OllamaEmbedder, make_embedder
 from backend.src.normalizer import Normalizer
 from backend.src.rag import RAGPipeline
 from backend.src.search import SearchEngine
@@ -39,13 +44,14 @@ API_BASE = os.getenv("AXIS_API_BASE", "http://localhost:8000")
 # ----- Resource bootstrap (cached) -----------------------------------------
 
 @st.cache_resource
-def get_pipeline() -> tuple[SearchEngine, RAGPipeline]:
+def get_pipeline() -> tuple[SearchEngine, RAGPipeline, Any]:
     store = VectorStore(path=settings.chroma_db_path)
-    embedder = Embedder()
+    app_cfg = load_app_config()
+    embedder = make_embedder(app_cfg.embedder)
     normalizer = Normalizer.from_config(load_axes_config())
     engine = SearchEngine(store, embedder, normalizer)
     rag = RAGPipeline(engine)
-    return engine, rag
+    return engine, rag, embedder
 
 
 @st.cache_data
@@ -53,7 +59,7 @@ def get_axes_config() -> dict:
     return load_axes_config()
 
 
-engine, rag = get_pipeline()
+engine, rag, embedder = get_pipeline()
 axes_cfg = get_axes_config()
 
 
@@ -64,7 +70,13 @@ st.caption(
     "YAML frontmatter 付き Markdown ナレッジに対する、軸検索 + RAG 検索の Local-first OSS"
 )
 mode_badges: list[str] = []
-mode_badges.append("🤖 Embedder: " + ("DUMMY" if Embedder().is_dummy else "Gemini"))
+if embedder.is_dummy:
+    _emb_label = "DUMMY"
+elif isinstance(embedder, OllamaEmbedder):
+    _emb_label = f"Ollama ({embedder.model_name})"
+else:
+    _emb_label = "Gemini"
+mode_badges.append("🤖 Embedder: " + _emb_label)
 mode_badges.append("🤖 RAG: " + ("DUMMY" if rag.is_dummy else (rag._model or "Claude")))
 st.caption(" | ".join(mode_badges))
 

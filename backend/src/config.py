@@ -141,6 +141,46 @@ class ChatConfig:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# spec_045: Ollama / Llama.cpp backend selection (embedder + generation)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class OllamaConfig:
+    """Connection settings for an Ollama backend (shared by embedder + gen)."""
+
+    model: str = "bge-m3"
+    url: str = "http://localhost:11434"
+
+
+@dataclass(frozen=True)
+class EmbedderConfig:
+    """Selects which embedder backend ``make_embedder()`` builds.
+
+    ``backend``: ``"gemini"`` (v0.8.1 default) | ``"ollama"`` | ``"dummy"``.
+    ``ollama``: connection settings when ``backend="ollama"``. ``bge-m3`` is
+    the default model (1024-dim, multilingual JP/EN).
+    """
+
+    backend: str = "gemini"
+    ollama: OllamaConfig = field(default_factory=lambda: OllamaConfig(model="bge-m3"))
+
+
+@dataclass(frozen=True)
+class GenerationConfig:
+    """Selects which generation backend ``make_generation_backend()`` builds.
+
+    ``backend``: ``"claude"`` (v0.8.1 default) | ``"ollama"`` | ``"dummy"``.
+    ``ollama``: connection settings when ``backend="ollama"``. ``llama3``
+    is a sensible default; swap for ``llama3:70b`` / ``mistral`` etc. via
+    ``config.yml``.
+    """
+
+    backend: str = "claude"
+    ollama: OllamaConfig = field(default_factory=lambda: OllamaConfig(model="llama3"))
+
+
 @dataclass(frozen=True)
 class GraphConfig:
     """Settings for the refs-driven knowledge graph layer (spec_040).
@@ -166,6 +206,10 @@ class AppConfig:
     rag: RAGConfig = field(default_factory=RAGConfig)
     chat: ChatConfig = field(default_factory=ChatConfig)
     graph: GraphConfig = field(default_factory=GraphConfig)
+    # spec_045: Ollama / Llama.cpp backend selection (defaults preserve
+    # v0.8.1 behaviour — Gemini for embedding, Claude for generation).
+    embedder: EmbedderConfig = field(default_factory=EmbedderConfig)
+    generation: GenerationConfig = field(default_factory=GenerationConfig)
 
 
 def load_app_config(path: Path | None = None) -> AppConfig:
@@ -208,6 +252,10 @@ def _build_app_config(raw: dict) -> AppConfig:
     rew_raw = (chat_raw.get("rewriter") or {}) if isinstance(chat_raw, dict) else {}
     store_raw = (chat_raw.get("storage") or {}) if isinstance(chat_raw, dict) else {}
     graph_raw = (raw.get("graph") or {}) if isinstance(raw, dict) else {}
+    emb_raw = (raw.get("embedder") or {}) if isinstance(raw, dict) else {}
+    emb_ollama_raw = (emb_raw.get("ollama") or {}) if isinstance(emb_raw, dict) else {}
+    gen_raw = (raw.get("generation") or {}) if isinstance(raw, dict) else {}
+    gen_ollama_raw = (gen_raw.get("ollama") or {}) if isinstance(gen_raw, dict) else {}
 
     pd = ParentDocConfig(
         enabled=bool(pd_raw.get("enabled", ParentDocConfig.enabled)),
@@ -258,11 +306,29 @@ def _build_app_config(raw: dict) -> AppConfig:
         ),
         knowledge_dir=str(graph_raw.get("knowledge_dir", GraphConfig.knowledge_dir)),
     )
+    emb_default = EmbedderConfig()
+    embedder = EmbedderConfig(
+        backend=str(emb_raw.get("backend", emb_default.backend)),
+        ollama=OllamaConfig(
+            model=str(emb_ollama_raw.get("model", emb_default.ollama.model)),
+            url=str(emb_ollama_raw.get("url", emb_default.ollama.url)),
+        ),
+    )
+    gen_default = GenerationConfig()
+    generation = GenerationConfig(
+        backend=str(gen_raw.get("backend", gen_default.backend)),
+        ollama=OllamaConfig(
+            model=str(gen_ollama_raw.get("model", gen_default.ollama.model)),
+            url=str(gen_ollama_raw.get("url", gen_default.ollama.url)),
+        ),
+    )
     return AppConfig(
         retrieval=RetrievalConfig(parent_doc=pd, time_decay=td),
         rag=rag,
         chat=chat,
         graph=graph,
+        embedder=embedder,
+        generation=generation,
     )
 
 

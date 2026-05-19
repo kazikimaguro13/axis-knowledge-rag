@@ -1,13 +1,19 @@
-"""RAG pipeline: retrieve via SearchEngine, generate with Claude.
+"""RAG pipeline: retrieve via SearchEngine, generate with Claude or Ollama.
 
 Returns an Answer that contains the generated text + citation list,
 preserving source document IDs for downstream UI rendering.
+
+spec_045: ``GenerationBackend`` Protocol abstracts the LLM call so a fully
+on-prem Ollama backend can replace the default Anthropic Claude path without
+touching the retrieval / citation logic.
 """
+
+from __future__ import annotations
 
 import logging
 import os
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from backend.src._citations import parse_and_validate_citations
 from backend.src.config import load_app_config, settings
@@ -16,10 +22,13 @@ from backend.src.conversation import (
     Message,
     get_default_store,
 )
-from backend.src.embedder import Embedder
+from backend.src.embedder import make_embedder
 from backend.src.question_rewriter import rewrite_question
 from backend.src.search import SearchEngine, SearchResult
 from backend.src.vector_store import VectorStore
+
+if TYPE_CHECKING:
+    from backend.src.config import GenerationConfig
 
 logger = logging.getLogger(__name__)
 
@@ -170,6 +179,172 @@ def _dummy_answer(question: str, results: list[SearchResult]) -> Answer:
     )
 
 
+# ---------------------------------------------------------------------------
+# spec_045: GenerationBackend Protocol + Claude/Ollama implementations
+# ---------------------------------------------------------------------------
+
+
+@runtime_checkable
+class GenerationBackend(Protocol):
+    """Protocol for the LLM call inside :class:`RAGPipeline`.
+
+    Backends only see the system prompt and a Claude-compatible
+    ``messages: [{"role": "...", "content": "..."}]`` list. They are not
+    responsible for prompt construction or citation parsing.
+    """
+
+    def generate(
+        self,
+        system: str,
+        messages: list[dict[str, str]],
+        *,
+        max_tokens: int = 1024,
+    ) -> str: ...
+
+    @property
+    def model_name(self) -> str: ...
+
+    @property
+    def is_dummy(self) -> bool: ...
+
+
+class ClaudeBackend:
+    """Anthropic Claude backend (v0.8.1 default)."""
+
+    def __init__(
+        self,
+        *,
+        api_key: str | None = None,
+        model: str = DEFAULT_MODEL,
+    ) -> None:
+        from anthropic import Anthropic
+
+        self._client = Anthropic(api_key=api_key or settings.anthropic_api_key)
+        self._model = model
+
+    @property
+    def model_name(self) -> str:
+        return self._model
+
+    @property
+    def is_dummy(self) -> bool:
+        return False
+
+    def generate(
+        self,
+        system: str,
+        messages: list[dict[str, str]],
+        *,
+        max_tokens: int = 1024,
+    ) -> str:
+        resp = self._client.messages.create(
+            model=self._model,
+            max_tokens=max_tokens,
+            system=system,
+            messages=messages,
+        )
+        return "".join(b.text for b in resp.content if hasattr(b, "text"))
+
+
+class OllamaBackend:
+    """Ollama ``/api/chat`` backend (spec_045 fully on-prem path)."""
+
+    DEFAULT_MODEL = "llama3"
+    DEFAULT_URL = "http://localhost:11434"
+
+    def __init__(
+        self,
+        *,
+        model: str = DEFAULT_MODEL,
+        url: str = DEFAULT_URL,
+    ) -> None:
+        import ollama
+
+        self._client = ollama.Client(host=url)
+        self._model = model
+        self._url = url
+
+    @property
+    def model_name(self) -> str:
+        return self._model
+
+    @property
+    def is_dummy(self) -> bool:
+        return False
+
+    def generate(
+        self,
+        system: str,
+        messages: list[dict[str, str]],
+        *,
+        max_tokens: int = 1024,
+    ) -> str:
+        ollama_messages: list[dict[str, str]] = [{"role": "system", "content": system}]
+        ollama_messages.extend(messages)
+        resp = self._client.chat(
+            model=self._model,
+            messages=ollama_messages,
+            options={"num_predict": max_tokens},
+        )
+        return resp["message"]["content"]
+
+
+class DummyGenerationBackend:
+    """Sentinel — never actually called; :class:`RAGPipeline` short-circuits to
+    :func:`_dummy_answer` when ``is_dummy`` is True. Kept so the factory always
+    returns a ``GenerationBackend`` and call sites avoid ``Optional``."""
+
+    @property
+    def model_name(self) -> str:
+        return "dummy"
+
+    @property
+    def is_dummy(self) -> bool:
+        return True
+
+    def generate(
+        self,
+        system: str,
+        messages: list[dict[str, str]],
+        *,
+        max_tokens: int = 1024,
+    ) -> str:
+        return "提供された資料には記載がありません。"
+
+
+def make_generation_backend(cfg: GenerationConfig | None = None) -> GenerationBackend:
+    """Build a :class:`GenerationBackend` from :class:`GenerationConfig`.
+
+    - ``cfg is None`` → defaults (``backend="claude"``).
+    - ``backend="claude"``: Anthropic client; auto-falls back to dummy when
+      ``ANTHROPIC_API_KEY`` is missing (v0.8.1 behaviour).
+    - ``backend="ollama"``: spec_045 on-prem chat path. Falls back to dummy
+      on ImportError / connection failure so callers never crash at startup.
+    - ``backend="dummy"``: explicit dummy.
+    """
+    if cfg is None:
+        from backend.src.config import GenerationConfig as _GC
+
+        cfg = _GC()
+    backend = (cfg.backend or "claude").lower()
+    if backend == "ollama":
+        try:
+            return OllamaBackend(model=cfg.ollama.model, url=cfg.ollama.url)
+        except Exception as e:  # noqa: BLE001
+            logger.warning(
+                "Ollama generation backend failed (%s), falling back to DUMMY", e
+            )
+            return DummyGenerationBackend()
+    if backend == "dummy":
+        return DummyGenerationBackend()
+    if not settings.anthropic_api_key:
+        logger.warning("RAGPipeline running in DUMMY mode (no ANTHROPIC_API_KEY)")
+        return DummyGenerationBackend()
+    if backend != "claude":
+        logger.warning("Unknown generation backend %r, falling back to claude", backend)
+    return ClaudeBackend(model=DEFAULT_MODEL)
+
+
 class RAGPipeline:
     def __init__(
         self,
@@ -178,27 +353,79 @@ class RAGPipeline:
         force_dummy: bool = False,
         model: str = DEFAULT_MODEL,
         context_max_chars: int | None = None,
+        backend: GenerationBackend | None = None,
     ) -> None:
         self._engine = engine
         self._model = model
-        self._use_dummy = force_dummy or not settings.anthropic_api_key
         if context_max_chars is None:
             try:
                 context_max_chars = load_app_config().rag.context_max_chars
             except Exception:  # noqa: BLE001
                 context_max_chars = 8000
         self._context_max_chars = context_max_chars
-        if self._use_dummy:
+        # ``backend`` overrides everything. Else: ``force_dummy`` short-circuits
+        # to DummyGenerationBackend, otherwise the factory inspects config /
+        # ANTHROPIC_API_KEY to decide Claude vs dummy. This preserves v0.8.1
+        # behaviour exactly when no caller specifies a backend.
+        if backend is not None:
+            self._backend: GenerationBackend = backend
+        elif force_dummy:
+            self._backend = DummyGenerationBackend()
+        elif not settings.anthropic_api_key:
             logger.warning("RAGPipeline running in DUMMY mode (no ANTHROPIC_API_KEY)")
-            self._client = None
+            self._backend = DummyGenerationBackend()
         else:
-            from anthropic import Anthropic
-
-            self._client = Anthropic(api_key=settings.anthropic_api_key)
+            self._backend = ClaudeBackend(model=model)
+        # Keep this attribute readable by older tests that mock ``_client``
+        # directly. The chat path reads from ``self._backend.generate(...)`` —
+        # the legacy ``answer()`` path also delegates there.
+        self._client = getattr(self._backend, "_client", None)
+        self._use_dummy = self._backend.is_dummy
 
     @property
     def is_dummy(self) -> bool:
-        return self._use_dummy
+        return bool(self._use_dummy)
+
+    @property
+    def backend_name(self) -> str:
+        """Short label for telemetry: ``CLAUDE`` / ``OLLAMA`` / ``DUMMY``."""
+        if self._backend.is_dummy:
+            return "DUMMY"
+        if isinstance(self._backend, OllamaBackend):
+            return "OLLAMA"
+        if isinstance(self._backend, ClaudeBackend):
+            return "CLAUDE"
+        return type(self._backend).__name__.upper()
+
+    def _call_generation(
+        self,
+        *,
+        system: str,
+        messages: list[dict[str, str]],
+        max_tokens: int,
+    ) -> str:
+        """Delegate to the active backend's ``generate`` call.
+
+        Test shim: if a ``_client`` attribute has been injected (legacy
+        v0.8.1 test path that monkey-patched the Anthropic SDK directly),
+        prefer it so existing tests keep working without reworking the
+        fake-Anthropic helpers.
+        """
+        client = getattr(self, "_client", None)
+        if client is not None and not self._use_dummy:
+            # Legacy path: tests mock the Anthropic Messages API on _client.
+            create = getattr(getattr(client, "messages", None), "create", None)
+            if callable(create):
+                resp = create(
+                    model=self._model,
+                    max_tokens=max_tokens,
+                    system=system,
+                    messages=messages,
+                )
+                return "".join(
+                    block.text for block in resp.content if hasattr(block, "text")
+                )
+        return self._backend.generate(system, messages, max_tokens=max_tokens)
 
     def answer(
         self,
@@ -223,13 +450,11 @@ class RAGPipeline:
             f"# 提供された資料 (上位 {len(results)} 件)\n\n{context}\n\n"
             "上記の資料のみを根拠に、出典マーク [N] (N は 1 始まり、上の 出典 i の i と一致) を付けて回答してください。"
         )
-        resp = self._client.messages.create(
-            model=self._model,
-            max_tokens=max_tokens,
+        raw = self._call_generation(
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": user_msg}],
+            max_tokens=max_tokens,
         )
-        raw = "".join(block.text for block in resp.content if hasattr(block, "text"))
         text, used = parse_and_validate_citations(raw, n_sources=len(results))
         cited_ids = [results[i].id for i in sorted(used)]
         return Answer(
@@ -237,7 +462,7 @@ class RAGPipeline:
             sources=results,
             cited_ids=cited_ids,
             is_dummy=False,
-            model=self._model,
+            model=self._backend.model_name,
         )
 
     # ------------------------------------------------------------------
@@ -350,13 +575,11 @@ class RAGPipeline:
                 ),
             }
         )
-        resp = self._client.messages.create(
-            model=self._model,
-            max_tokens=max_tokens,
+        raw = self._call_generation(
             system=CHAT_SYSTEM_PROMPT,
             messages=messages,
+            max_tokens=max_tokens,
         )
-        raw = "".join(block.text for block in resp.content if hasattr(block, "text"))
         text, used = parse_and_validate_citations(raw, n_sources=len(results))
         cited_ids = [results[i].id for i in sorted(used)]
         return Answer(
@@ -364,7 +587,7 @@ class RAGPipeline:
             sources=results,
             cited_ids=cited_ids,
             is_dummy=False,
-            model=self._model,
+            model=self._backend.model_name,
         )
 
 
@@ -409,9 +632,10 @@ def _main(argv: list[str]) -> int:
         if v is not None
     }
     store = VectorStore(path=Path(args.db_path))
-    embedder = Embedder()
+    app_cfg = load_app_config()
+    embedder = make_embedder(app_cfg.embedder)
     engine = SearchEngine(store, embedder)
-    rag = RAGPipeline(engine)
+    rag = RAGPipeline(engine, backend=make_generation_backend(app_cfg.generation))
     ans = rag.answer(args.question, filters=filters or None, top_k=args.top)
 
     print(f"\n=== Answer (model={ans.model}, dummy={ans.is_dummy}) ===\n")

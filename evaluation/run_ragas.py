@@ -34,15 +34,15 @@ METRICS = [faithfulness, answer_relevancy, context_precision, context_recall]
 def _build_pipeline():
     """Instantiate SearchEngine + RAGPipeline from project config."""
     from backend.src.bm25_index import BM25Index
-    from backend.src.config import load_axes_config, settings
-    from backend.src.embedder import Embedder
+    from backend.src.config import load_app_config, load_axes_config, settings
+    from backend.src.embedder import make_embedder
     from backend.src.normalizer import Normalizer
     from backend.src.rag import RAGPipeline
     from backend.src.search import SearchEngine
     from backend.src.vector_store import VectorStore
 
     store = VectorStore(path=settings.chroma_db_path)
-    embedder = Embedder()
+    embedder = make_embedder(load_app_config().embedder)
     normalizer = Normalizer.from_config(load_axes_config())
     try:
         bm25 = BM25Index.load(settings.chroma_db_path / "bm25_index.pkl")

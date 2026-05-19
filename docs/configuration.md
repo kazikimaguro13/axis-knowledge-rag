@@ -97,6 +97,65 @@ GraphRAG + knowledge-graph settings (spec_040).
 
 ---
 
+## `embedder` (spec_045)
+
+Selects the embedder backend. See [ADR-026](adr/ADR-026-ollama-integration.md)
+and `docs/deployment.md` for the on-prem setup.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `backend` | string | `"gemini"` | `"gemini"` (v0.8.1 default, 768-dim) / `"ollama"` (fully on-prem) / `"dummy"` (deterministic hash, offline). |
+| `ollama.model` | string | `"bge-m3"` | Ollama model name. `bge-m3` is multilingual JP/EN, 1024-dim. |
+| `ollama.url` | string | `"http://localhost:11434"` | Ollama daemon URL. |
+
+> **Dim mismatch warning**: switching `backend` between `gemini` (768-dim)
+> and `ollama` with `bge-m3` (1024-dim) requires rebuilding the index:
+> `python -m scripts.build_index ./examples/knowledge --rebuild`. The
+> ChromaDB collection's dim is fixed at create-time.
+
+> **Ollama unavailable**: when `backend="ollama"` but the `ollama` Python
+> package is missing or the daemon is unreachable, the factory logs a
+> warning and falls back to `DummyEmbedder` so app startup never blocks.
+> Install with `pip install -e ".[ollama]"`.
+
+```yaml
+# config.yml — example: fully on-prem
+embedder:
+  backend: "ollama"
+  ollama:
+    model: "bge-m3"
+    url: "http://localhost:11434"
+```
+
+---
+
+## `generation` (spec_045)
+
+Selects the LLM backend used by the RAG pipeline.
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `backend` | string | `"claude"` | `"claude"` (v0.8.1 default, Anthropic SDK) / `"ollama"` (fully on-prem) / `"dummy"`. |
+| `ollama.model` | string | `"llama3"` | Ollama chat model. Try `llama3:70b` / `qwen2.5:14b` for higher quality. |
+| `ollama.url` | string | `"http://localhost:11434"` | Ollama daemon URL. |
+
+When `backend="claude"` but `ANTHROPIC_API_KEY` is unset, the pipeline
+falls back to deterministic DUMMY answers (v0.8.1 behaviour preserved).
+Same applies to Ollama on connection failure — the user-facing UX never
+blocks; check logs for the warning if answers look unexpectedly dummy.
+
+```yaml
+# config.yml — example: Claude embedder, Ollama generation
+embedder:
+  backend: "gemini"
+generation:
+  backend: "ollama"
+  ollama:
+    model: "qwen2.5:14b"
+```
+
+---
+
 ## Environment variables
 
 ### `EVAL_OVERRIDE_FLAG` (spec_042)

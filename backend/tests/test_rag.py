@@ -330,3 +330,118 @@ def test_build_context_respects_max_chars_budget() -> None:
     out = build_context(results, max_chars=6000)
     # Should fit at most one full block (~5000+header), the next should be dropped.
     assert out.count("## 出典") == 1
+
+
+# ---------------------------------------------------------------------------
+# spec_045: GenerationBackend Protocol + factory + OllamaBackend
+# ---------------------------------------------------------------------------
+
+
+class _FakeOllamaClient:
+    """Minimal stand-in for ``ollama.Client``."""
+
+    def __init__(self, reply_text: str = "OK[1].") -> None:
+        self._reply = reply_text
+        self.last_call: dict = {}
+
+    def chat(self, model: str, messages: list[dict], options: dict) -> dict:
+        self.last_call = {"model": model, "messages": messages, "options": options}
+        return {"message": {"role": "assistant", "content": self._reply}}
+
+
+def _install_fake_ollama(monkeypatch: pytest.MonkeyPatch, reply: str = "OK[1].") -> _FakeOllamaClient:
+    """Inject a fake ``ollama`` module so OllamaBackend(...) succeeds offline."""
+    import sys
+    from unittest.mock import MagicMock
+
+    client = _FakeOllamaClient(reply)
+    fake = MagicMock()
+    fake.Client.return_value = client
+    monkeypatch.setitem(sys.modules, "ollama", fake)
+    return client
+
+
+def test_generation_backend_protocol_runtime_check() -> None:
+    from backend.src.rag import (
+        DummyGenerationBackend,
+        GenerationBackend,
+    )
+
+    assert isinstance(DummyGenerationBackend(), GenerationBackend)
+
+
+def test_make_generation_backend_dummy() -> None:
+    from backend.src.config import GenerationConfig
+    from backend.src.rag import DummyGenerationBackend, make_generation_backend
+
+    b = make_generation_backend(GenerationConfig(backend="dummy"))
+    assert isinstance(b, DummyGenerationBackend)
+    assert b.is_dummy is True
+
+
+def test_make_generation_backend_claude_no_key_falls_back_to_dummy() -> None:
+    """No ANTHROPIC_API_KEY → factory yields the dummy backend (v0.8.1 behaviour)."""
+    from backend.src.config import GenerationConfig
+    from backend.src.rag import DummyGenerationBackend, make_generation_backend
+
+    # CI has no ANTHROPIC_API_KEY → dummy fallback.
+    b = make_generation_backend(GenerationConfig(backend="claude"))
+    assert isinstance(b, DummyGenerationBackend)
+
+
+def test_make_generation_backend_ollama_import_failure_falls_back(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from unittest.mock import patch
+
+    from backend.src.config import GenerationConfig, OllamaConfig
+    from backend.src.rag import (
+        DummyGenerationBackend,
+        OllamaBackend,
+        make_generation_backend,
+    )
+
+    with patch.object(
+        OllamaBackend, "__init__", side_effect=ImportError("ollama not installed")
+    ):
+        b = make_generation_backend(
+            GenerationConfig(backend="ollama", ollama=OllamaConfig())
+        )
+    assert isinstance(b, DummyGenerationBackend)
+
+
+def test_ollama_backend_generate_uses_chat_api(monkeypatch: pytest.MonkeyPatch) -> None:
+    from backend.src.rag import OllamaBackend
+
+    client = _install_fake_ollama(monkeypatch, reply="Fully-on-prem reply[1].")
+    b = OllamaBackend(model="llama3", url="http://localhost:11434")
+    out = b.generate(
+        system="SYS",
+        messages=[{"role": "user", "content": "hi"}],
+        max_tokens=128,
+    )
+    assert out == "Fully-on-prem reply[1]."
+    assert client.last_call["model"] == "llama3"
+    # system prompt was prepended before the user messages
+    assert client.last_call["messages"][0] == {"role": "system", "content": "SYS"}
+    assert client.last_call["messages"][1] == {"role": "user", "content": "hi"}
+    assert client.last_call["options"]["num_predict"] == 128
+    assert b.is_dummy is False
+    assert b.model_name == "llama3"
+
+
+def test_rag_pipeline_uses_injected_ollama_backend(
+    rag_pipeline: RAGPipeline, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """End-to-end: RAGPipeline(backend=OllamaBackend) hits Ollama, not Claude."""
+    from backend.src.rag import OllamaBackend
+
+    _install_fake_ollama(monkeypatch, reply="OK from llama[1].")
+    rag_pipeline._use_dummy = False  # noqa: SLF001
+    rag_pipeline._backend = OllamaBackend()  # noqa: SLF001
+    rag_pipeline._client = None  # noqa: SLF001 — disable legacy test shim
+
+    ans = rag_pipeline.answer("question?", top_k=1)
+    assert ans.is_dummy is False
+    assert "[1]" in ans.text
+    assert ans.model == "llama3"

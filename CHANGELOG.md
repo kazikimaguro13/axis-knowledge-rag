@@ -2,6 +2,58 @@
 
 ## [Unreleased]
 
+### Day 45 (2026-05-19) — Ollama / Llama.cpp integration (spec_045)
+
+v0.9.0 marquee #1: fully on-prem RAG. Both the embedder and the
+generation call can now be served by a local Ollama daemon so internal /
+private corpora never leave the network. v0.8.1 behaviour is preserved
+exactly when the two new config keys keep their defaults.
+
+- **embedder Protocol + 3 backends**: `backend/src/embedder.py` reworked
+  into an `Embedder` Protocol with `GeminiEmbedder` (renamed from the
+  v0.8.1 class), `OllamaEmbedder` (new, `bge-m3` default, 1024-dim
+  multilingual), and `DummyEmbedder` (replaces the old
+  `Embedder(force_dummy=True)` pattern). `make_embedder(EmbedderConfig)`
+  factory dispatches; the optional `ollama` Python package is gated by
+  the new `[ollama]` extra. On ImportError / unreachable daemon, the
+  factory logs a warning and returns `DummyEmbedder` so app startup
+  never blocks
+- **generation Protocol + 3 backends**: `backend/src/rag.py` adds
+  `GenerationBackend` Protocol + `ClaudeBackend` (wraps Anthropic SDK) +
+  `OllamaBackend` (wraps `ollama.Client.chat`, translates Claude-style
+  `(system, messages)` into the Ollama chat format) +
+  `DummyGenerationBackend`. `RAGPipeline.answer` / `chat` now go through
+  `self._backend.generate(...)` with a small shim that preserves
+  legacy tests that monkey-patched `_client` directly
+- **config**: `backend/src/config.py` adds `EmbedderConfig`,
+  `GenerationConfig`, and the shared `OllamaConfig` (`model` + `url`),
+  wired into `AppConfig`. `_build_app_config()` reads the new
+  `config.yml > embedder.*` and `generation.*` sections; both default to
+  v0.8.1 backends. `config.yml` ships with the new sections + inline docs
+- **question_rewriter**: `rewrite_question()` gained a `backend` arg so
+  the chat-rewrite step can also avoid the network when Ollama is used
+- **docker-compose**: new `ollama` service under `profiles: ["ollama"]`
+  + `ollama-data` named volume. Activate with
+  `docker compose --profile ollama up -d ollama` and pull models with
+  `docker exec axis-ollama ollama pull <model>`
+- **api.py / mcp_server / scripts / streamlit_app**: all factory call
+  sites now read `app_cfg.embedder` / `app_cfg.generation`. `/api/health`
+  reports `OLLAMA` / `GEMINI` / `DUMMY` / `CLAUDE` accurately for both
+  halves of the pipeline
+- backend/tests: `test_embedder.py` 4 → 12 (+8 — Protocol runtime check,
+  DummyEmbedder dim, 4 factory branches, 2 OllamaEmbedder w/ ollama mock);
+  `test_rag.py` 23 → 29 (+6 — GenerationBackend Protocol, 3 factory
+  branches, OllamaBackend chat-API contract, RAGPipeline end-to-end with
+  injected OllamaBackend); new `test_ollama_backend.py` (2 integration
+  tests, gated by `pytest.importorskip("ollama")` + server reachability +
+  `AXIS_OLLAMA_INTEGRATION=1` opt-in)
+- docs: ADR-026 (Ollama integration, dim-mismatch consequence documented),
+  `docs/deployment.md` — new "Fully On-Prem with Ollama" section with
+  model selection table and rebuild instructions, `docs/configuration.md`
+  — `embedder` / `generation` reference
+- 既存 358 tests + 新規 14 件 = **372 件 PASS** (2 skipped: redis + ollama
+  optional deps), ruff 緑
+
 ### Day 43 (2026-05-14) — demo bugfix (spec_043)
 
 v0.8.1 リリース後の portfolio demo GIF 撮影中に発覚した 2 件の UX バグを修正

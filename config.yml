@@ -87,3 +87,26 @@ graph:
   max_neighbors_per_query: 20
   expand_on_search: false
   knowledge_dir: "./examples/knowledge"
+
+# spec_045: Ollama / Llama.cpp full on-prem backend selection.
+# Defaults preserve v0.8.1 behaviour (Gemini for embedding, Claude for
+# generation). Flip the `backend` keys to "ollama" to run fully on-prem;
+# the embedder switch is index-incompatible (bge-m3 = 1024 dim vs Gemini =
+# 768 dim) so run `python -m scripts.build_index ... --rebuild` after.
+#
+#   embedder.backend:    "gemini" (default) | "ollama" | "dummy"
+#   generation.backend:  "claude" (default) | "ollama" | "dummy"
+#
+# Ollama itself: `docker compose --profile ollama up -d ollama` and then
+# `docker exec axis-ollama ollama pull <model>` (see docs/deployment.md).
+embedder:
+  backend: "gemini"
+  ollama:
+    model: "bge-m3"                  # 1024-dim multilingual (JP/EN)
+    url: "http://localhost:11434"
+
+generation:
+  backend: "claude"
+  ollama:
+    model: "llama3"                  # try "llama3:70b" / "qwen2.5" / etc.
+    url: "http://localhost:11434"

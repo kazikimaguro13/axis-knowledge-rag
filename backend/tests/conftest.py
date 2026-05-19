@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from backend.src.embedder import Embedder
+from backend.src.embedder import DummyEmbedder, Embedder
 from backend.src.loader import Document
 from backend.src.search import SearchEngine
 from backend.src.vector_store import VectorStore
@@ -12,7 +12,7 @@ from backend.src.vector_store import VectorStore
 
 @pytest.fixture
 def dummy_embedder() -> Embedder:
-    return Embedder(force_dummy=True)
+    return DummyEmbedder()
 
 
 @pytest.fixture
