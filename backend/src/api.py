@@ -20,10 +20,10 @@ from backend.src.conversation import (
     configure_default_store,
     make_conversation_store,
 )
-from backend.src.embedder import Embedder
+from backend.src.embedder import make_embedder
 from backend.src.graph import KnowledgeGraph, build_default_graph
 from backend.src.normalizer import Normalizer
-from backend.src.rag import RAGPipeline
+from backend.src.rag import RAGPipeline, make_generation_backend
 from backend.src.schemas import (
     AnswerRequest,
     AnswerResponse,
@@ -57,9 +57,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     configure_logging()
     logger.info("Initializing axis-knowledge-rag API...")
     store = VectorStore(path=settings.chroma_db_path)
-    embedder = Embedder()
-    normalizer = Normalizer.from_config(load_axes_config())
     app_cfg = load_app_config()
+    embedder = make_embedder(app_cfg.embedder)
+    normalizer = Normalizer.from_config(load_axes_config())
     pd = app_cfg.retrieval.parent_doc
     if pd.enabled and not store.has_parents():
         logger.warning(
@@ -93,7 +93,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         top_k_children=pd.top_k_children,
         graph=graph,
     )
-    rag = RAGPipeline(engine, context_max_chars=app_cfg.rag.context_max_chars)
+    rag = RAGPipeline(
+        engine,
+        context_max_chars=app_cfg.rag.context_max_chars,
+        backend=make_generation_backend(app_cfg.generation),
+    )
     chat_store = make_conversation_store(app_cfg.chat)
     configure_default_store(chat_store)
     logger.info(
@@ -124,6 +128,23 @@ def _pkg_version() -> str:
         return version("axis-knowledge-rag")
     except PackageNotFoundError:
         return "unknown"
+
+
+def _describe_embedder(e) -> str:
+    if e.is_dummy:
+        return "DUMMY"
+    from backend.src.embedder import OllamaEmbedder
+
+    if isinstance(e, OllamaEmbedder):
+        return "OLLAMA"
+    return "GEMINI"
+
+
+def _describe_rag(r) -> str:
+    if r.is_dummy:
+        return "DUMMY"
+    backend = getattr(r, "backend_name", None)
+    return backend or "CLAUDE"
 
 
 app = FastAPI(
@@ -165,8 +186,8 @@ async def health() -> HealthResponse:
     return HealthResponse(
         status="ok",
         version=_pkg_version(),
-        embedder_mode="DUMMY" if _state["embedder"].is_dummy else "GEMINI",
-        rag_mode="DUMMY" if _state["rag"].is_dummy else "CLAUDE",
+        embedder_mode=_describe_embedder(_state["embedder"]),
+        rag_mode=_describe_rag(_state["rag"]),
     )
 
 

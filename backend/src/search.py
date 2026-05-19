@@ -23,7 +23,7 @@ from backend.src._decay import blend_score, decay_factor
 from backend.src.bm25_index import BM25Index
 from backend.src.chunker import ParentChunk
 from backend.src.config import TimeDecayConfig
-from backend.src.embedder import Embedder
+from backend.src.embedder import Embedder, make_embedder
 from backend.src.graph import KnowledgeGraph
 from backend.src.normalizer import Normalizer
 from backend.src.vector_store import VectorStore
@@ -559,9 +559,9 @@ def _main(argv: list[str]) -> int:
     from pathlib import Path
 
     store = VectorStore(path=Path(args.db_path))
-    embedder = Embedder()
-    normalizer = Normalizer.from_config(load_axes_config())
     app_cfg = load_app_config()
+    embedder = make_embedder(app_cfg.embedder)
+    normalizer = Normalizer.from_config(load_axes_config())
     pd = app_cfg.retrieval.parent_doc
     parent_doc_enabled = pd.enabled and store.has_parents()
     engine = SearchEngine(

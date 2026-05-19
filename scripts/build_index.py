@@ -30,7 +30,7 @@ from backend.src.config import (
     load_axes_config,
     settings,
 )
-from backend.src.embedder import Embedder
+from backend.src.embedder import OllamaEmbedder, make_embedder
 from backend.src.loader import load_directory
 from backend.src.normalizer import Normalizer
 from backend.src.vector_store import VectorStore
@@ -146,7 +146,7 @@ def main(argv: list[str]) -> int:
     if args.reset or args.rebuild:
         store.reset()
 
-    embedder = Embedder()
+    embedder = make_embedder(app_cfg.embedder)
 
     if mode == "parent_doc":
         pd = app_cfg.retrieval.parent_doc
@@ -197,7 +197,13 @@ def main(argv: list[str]) -> int:
         print(f"Indexed (legacy) {len(docs)} documents into {args.db_path}")
 
     print(f"Total in collection: {store.count()}")
-    print(f"Embedder mode: {'DUMMY' if embedder.is_dummy else 'GEMINI'}")
+    if embedder.is_dummy:
+        _mode = "DUMMY"
+    elif isinstance(embedder, OllamaEmbedder):
+        _mode = f"OLLAMA ({embedder.model_name}, dim={embedder.dim})"
+    else:
+        _mode = "GEMINI"
+    print(f"Embedder mode: {_mode}")
     print(f"Index mode:    {mode}")
     return 0
 

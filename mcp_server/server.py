@@ -24,12 +24,12 @@ from backend.src.config import (
     load_axes_config,
     settings,
 )
-from backend.src.embedder import Embedder
+from backend.src.embedder import OllamaEmbedder, make_embedder
 from backend.src.graph import KnowledgeGraph, build_default_graph
 from backend.src.integrity import IntegrityChecker
 from backend.src.loader import load_directory
 from backend.src.normalizer import Normalizer
-from backend.src.rag import RAGPipeline
+from backend.src.rag import RAGPipeline, make_generation_backend
 from backend.src.search import SearchEngine, _build_where_norm
 from backend.src.vector_store import VectorStore
 from mcp_server._errors import make_error_response
@@ -103,9 +103,9 @@ def _get_engine() -> SearchEngine:
     global _engine
     if _engine is None:
         store = VectorStore(path=settings.chroma_db_path)
-        embedder = Embedder()
-        normalizer = Normalizer.from_config(load_axes_config())
         app_cfg = load_app_config()
+        embedder = make_embedder(app_cfg.embedder)
+        normalizer = Normalizer.from_config(load_axes_config())
         pd = app_cfg.retrieval.parent_doc
         if pd.enabled and not store.has_parents():
             logger.warning(
@@ -123,9 +123,15 @@ def _get_engine() -> SearchEngine:
             parent_doc_enabled=parent_doc_enabled,
             top_k_children=pd.top_k_children,
         )
+        if embedder.is_dummy:
+            _mode = "DUMMY"
+        elif isinstance(embedder, OllamaEmbedder):
+            _mode = "OLLAMA"
+        else:
+            _mode = "GEMINI"
         logger.info(
             "SearchEngine ready (embedder_mode=%s, parent_doc=%s)",
-            "DUMMY" if embedder.is_dummy else "GEMINI",
+            _mode,
             parent_doc_enabled,
         )
     return _engine
@@ -136,9 +142,11 @@ def _get_rag() -> RAGPipeline:
     if _rag is None:
         app_cfg = load_app_config()
         _rag = RAGPipeline(
-            _get_engine(), context_max_chars=app_cfg.rag.context_max_chars
+            _get_engine(),
+            context_max_chars=app_cfg.rag.context_max_chars,
+            backend=make_generation_backend(app_cfg.generation),
         )
-        logger.info("RAGPipeline ready (rag_mode=%s)", "DUMMY" if _rag.is_dummy else "CLAUDE")
+        logger.info("RAGPipeline ready (rag_mode=%s)", _rag.backend_name)
     return _rag
 
 
