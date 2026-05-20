@@ -507,13 +507,18 @@ async def get_neighbors(
     doc_id: str,
     hop: int = Query(1, ge=1, le=3),
     max_neighbors: int = Query(20, ge=1, le=100),
+    direction: str = Query(
+        "both",
+        pattern="^(in|out|both)$",
+        description="'out' = docs this refs, 'in' = docs that ref this, 'both' = union (spec_049).",
+    ),
 ) -> NeighborResponse:
     graph = _require_graph()
     node = graph.get_node(doc_id)
     if node is None:
         raise HTTPException(status_code=404, detail=f"doc_id {doc_id} not in graph")
     neighbour_ids = graph.neighbors_within_hop(
-        doc_id, hop=hop, max_neighbors=max_neighbors
+        doc_id, hop=hop, max_neighbors=max_neighbors, direction=direction
     )
     neighbours: list[GraphNodeModel] = []
     for nid in neighbour_ids:
