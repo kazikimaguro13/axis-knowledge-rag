@@ -2,6 +2,66 @@
 
 ## [Unreleased]
 
+### Day 48 (2026-05-20) — Knowledge-gap detection (spec_048)
+
+v0.9.0 marquee #4: log searches that came up empty or vague, log LLM
+answers that admitted "資料に記載がない", aggregate both into a weekly
+markdown report. Closes the silent-failure gap that spec_047's 👍 / 👎
+loop can't see — the user who searched, found nothing, and quietly
+closed the tab now leaves a trace.
+
+- **`backend/src/gap_detection.py`** (new) — `GapRecord` dataclass +
+  `GapStore` Protocol + `SqliteGapStore` (stdlib `sqlite3`, WAL mode,
+  single shared connection under `threading.Lock`). Default DB path
+  `~/.axis_gap.db` (next to `~/.axis_feedback.db` from spec_047).
+  `detect_no_info(text)` runs a tight regex over Japanese + English
+  "I don't know" phrasings anchored on what the SYSTEM_PROMPT actually
+  tells Claude to emit. `make_gap_store(cfg)` returns `None` when
+  `gap.enabled=false` so every hook short-circuits at zero cost
+- **`backend/src/search.py`** — post-hoc hook after fusion / decay /
+  graph expansion: `no_results` when results is empty, `low_score`
+  when `results[0].score < gap.low_score_threshold` (0.35 default,
+  matches the v0.8 RAGAS "weak hit" band). Axis-only listing calls
+  (`query is None`) are skipped. Wrapped in `try / except` →
+  `logger.warning` so the gap path can never fail a real search
+- **`backend/src/rag.py`** — `_record_llm_gap(question, text, results)`
+  runs `detect_no_info(text)` after `parse_and_validate_citations` and
+  records `llm_no_info` (with the top score for the report's "we had
+  docs but LLM refused" vs "no docs at all" distinction). Wired into
+  both the `answer()` and `chat()` paths; chat logs the *user-facing*
+  question rather than the rewritten one so the report is actionable
+- **GET /api/gap/report** (`backend/src/api.py`) — new endpoint behind
+  `_require_gap_store()` (503 when disabled). Lifespan builds the gap
+  store and shares the same instance with `SearchEngine` and
+  `RAGPipeline`; close runs on shutdown alongside the chat + feedback
+  stores
+- **`evaluation/gap_report.py`** (new) — pure-function
+  `generate_report(store, days=7)` + `save_report_to_file(...)` writing
+  `evaluation/gap_reports/YYYY-WW.md`. Sections: total counts per
+  reason (`no_results` / `low_score` / `llm_no_info`), top-10
+  unsatisfied queries (count desc, stable tie-break on query string,
+  reason annotations + avg top_score), and a 推奨アクション block
+  pointing at `examples/knowledge/` + the spec_046 `/api/ingest` path
+- **Makefile** — `gap-report` target shells into the renderer with the
+  default DB path. `~ $ make gap-report` →
+  `evaluation/gap_reports/2026-W21.md`
+- **`config.yml` + `backend/src/config.py`** — new `GapConfig`
+  (`enabled` + `db_path` + `low_score_threshold`) wired into
+  `AppConfig`. `_build_app_config()` reads the new `gap.*` section;
+  defaults preserve the on-by-default behaviour
+- **schemas**: `GapReportResponse` added to `backend/src/schemas.py`
+- **tests**: `backend/tests/test_gap_detection.py` (11 functions
+  covering 18 cases — 5 Japanese "no info" patterns, 2 English ones,
+  3 negative cases, empty-string detection, low_score record,
+  llm_no_info record, recent-window filtering, count, idempotent
+  close, factory disabled / enabled); `evaluation/tests/test_gap_report.py`
+  (3 — empty placeholder, top-queries section + reason annotations,
+  推奨アクション section + file write). All previously-passing tests
+  continue to pass; ruff 緑
+- **docs**: ADR-029 (rationale, signal-vs-spec_047 alternatives, false-
+  positive / PII / schema-overlap consequences); CHANGELOG Day 48
+  (this entry)
+
 ### Day 47 (2026-05-20) — Active-learning feedback loop (spec_047)
 
 v0.9.0 marquee #3: 👍 / 👎 capture on search results + chat answers,
