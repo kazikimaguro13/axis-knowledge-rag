@@ -605,5 +605,5 @@ def test_search_with_mismatched_dim_raises_clear_error(
     # Querying with a mismatched-dim embedding raises (Chroma surfaces
     # an InvalidDimensionException-like error). The exact class isn't
     # what the test cares about — just that it's not a silent crash.
-    with pytest.raises(Exception):
+    with pytest.raises(Exception, match=r"(?i)dimension|shape|expected"):
         in_memory_store.query([0.0] * (dummy_embedder.dim + 16), n_results=1)
