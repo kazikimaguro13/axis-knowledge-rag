@@ -2,6 +2,39 @@
 
 ## [Unreleased]
 
+### Day 49 (2026-05-20) — Bidirectional refs in GraphSidebar (spec_049)
+
+v0.9 minor: split the sidebar's flat "🔗 隣接" list into Obsidian-style
+"→ 参照している" (forwardlinks) and "← 参照されている" (backlinks)
+sections. The backend graph layer (spec_040) already encoded direction;
+the frontend was throwing that distinction away.
+
+- **`backend/src/api.py`** — `GET /api/graph/{doc_id}/neighbors` exposes
+  `direction` as a `Query(..., pattern="^(in|out|both)$")` parameter.
+  Default `"both"` keeps pre-spec_049 callers untouched
+- **`frontend/src/lib/graphClient.ts`** — `fetchNeighbors(...)` grew a
+  `direction` argument; new `fetchNeighborsBidirectional(...)` issues the
+  `out` and `in` requests in parallel via `Promise.all` and returns a
+  `NeighborSet` with `forwardlinks` + `backlinks` already split. Wall-
+  clock latency matches the single-call shape
+- **`frontend/src/components/GraphSidebar.tsx`** — renders the two
+  sections via a shared `<NeighborSection>` (with `aria-label` per side).
+  Empty sides are hidden entirely; both sides empty surfaces the
+  "このドキュメントは独立ノードです (リンク無し)。" placeholder
+- **MCP `axis_neighbors`** — `NeighborsInput` gained a `bidirectional`
+  boolean (default `false`). When set, the tool returns a payload with
+  forwardlinks + backlinks split, via
+  `format_neighbors_md_bidirectional` / `format_neighbors_json_bidirectional`.
+  Legacy callers see the unchanged single-direction shape — fully
+  backward-compatible. Single-direction markdown header also localises
+  to "→ 参照している" / "← 参照されている" when `direction` is set
+- **tests**: `backend/tests/test_api.py` +3 (`direction=out` / `=in` /
+  default-both); `frontend/__tests__/graph-sidebar.test.tsx` (new, 3
+  cases — forwardlinks populated, backlinks populated, isolated node).
+  All 32 MCP + backend tests still green; `tsc --noEmit` clean
+- **ADR-030** records the decision (parallel two-call vs. new combined
+  endpoint; flat-list-with-arrows alternative; hop > 1 caveat)
+
 ### Day 48 (2026-05-20) — Knowledge-gap detection (spec_048)
 
 v0.9.0 marquee #4: log searches that came up empty or vague, log LLM
