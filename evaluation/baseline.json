@@ -1,11 +1,11 @@
 {
-  "timestamp": "2026-05-14T00:00:00Z",
-  "git_sha": "<bootstrap>",
+  "timestamp": "2026-05-20T13:25:22.830744+00:00",
+  "git_sha": "f8d1f23",
   "dataset": "evaluation/datasets/qa_v1.json",
   "scores": {
-    "faithfulness": 0.0,
-    "answer_relevancy": 0.0,
-    "context_precision": 0.0,
-    "context_recall": 0.0
+    "faithfulness": 0.8288690476190477,
+    "answer_relevancy": 0.7048758524515119,
+    "context_precision": NaN,
+    "context_recall": 0.8
   }
 }
