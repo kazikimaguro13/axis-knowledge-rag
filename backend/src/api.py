@@ -2,11 +2,12 @@
 
 import asyncio
 import logging
+import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from importlib.metadata import PackageNotFoundError, version
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.src.config import (
@@ -259,11 +260,31 @@ async def get_axes() -> AxesResponse:
 
 # ---------------------------------------------------------------------------
 # spec_046: /api/ingest — browser-extension capture
+# spec_051 MID-1: opt-in token auth — when AXIS_INGEST_TOKEN is set in the
+# environment, every request must carry a matching ``X-Axis-Token`` header.
+# When unset, behaviour is the v0.8 default (no auth) so existing local-only
+# deployments keep working without config changes.
 # ---------------------------------------------------------------------------
 
 
+def _require_ingest_token(x_axis_token: str | None) -> None:
+    """401 when AXIS_INGEST_TOKEN is configured and the header doesn't match.
+
+    Read at call-time (not at import) so tests can monkey-patch
+    ``os.environ`` after the app has been built.
+    """
+    expected = (os.environ.get("AXIS_INGEST_TOKEN", "") or "").strip()
+    if not expected:
+        return
+    if x_axis_token != expected:
+        raise HTTPException(status_code=401, detail="invalid or missing X-Axis-Token")
+
+
 @app.post("/api/ingest", response_model=IngestResponse)
-async def post_ingest(req: IngestRequest) -> IngestResponse:
+async def post_ingest(
+    req: IngestRequest,
+    x_axis_token: str | None = Header(default=None, alias="X-Axis-Token"),
+) -> IngestResponse:
     """Persist a captured web page as YAML+Markdown under ``knowledge_dir``.
 
     The browser extension posts URL + title + body (+ optional user
@@ -271,6 +292,7 @@ async def post_ingest(req: IngestRequest) -> IngestResponse:
     operation is intentionally non-idempotent — every call yields a new
     timestamped file, which is also how name collisions are avoided.
     """
+    _require_ingest_token(x_axis_token)
 
     # Lazy import keeps the ingest_web module out of the cold-start path for
     # deployments that never use the browser extension.
