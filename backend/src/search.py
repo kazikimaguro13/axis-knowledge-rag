@@ -249,7 +249,7 @@ class SearchEngine:
             # distance from zero, which is arbitrary — but we mostly care about
             # the filter). top_k is bounded by collection size.
             n = min(top_k, max(self._store.count(), 1))
-            embedding = [0.0] * 768
+            embedding = [0.0] * self._embedder.dim
         else:
             q_norm = self._normalizer(query)
             embedding = self._embedder.embed(q_norm)
@@ -365,7 +365,7 @@ class SearchEngine:
         if query is None:
             # Axis-only: zero embedding, rely on the filter. top_k_children
             # is already a soft cap on the parent dedup pool.
-            embedding = [0.0] * 768
+            embedding = [0.0] * self._embedder.dim
             n_children = max(self._top_k_children, top_k)
         else:
             q_norm = self._normalizer(query)
