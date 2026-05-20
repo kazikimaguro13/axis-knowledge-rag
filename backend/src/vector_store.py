@@ -161,21 +161,28 @@ class VectorStore:
         spec_051 HIGH-1: used by ``api.lifespan`` to detect embedder /
         index dim mismatch on startup. Pulls a single row with
         ``include=["embeddings"]`` so the cost is independent of
-        collection size.
+        collection size. Chroma returns embeddings as a numpy array,
+        so guard with ``len()`` rather than ``or`` truthiness which
+        raises on multi-element arrays.
         """
         try:
             raw = self._collection.get(limit=1, include=["embeddings"])
         except Exception as e:  # noqa: BLE001
             logger.debug("probe_dim failed: %s", e)
             return None
-        embs = raw.get("embeddings") or []
-        if embs is None or len(embs) == 0:
+        embs = raw.get("embeddings")
+        if embs is None:
             return None
-        first = embs[0]
+        try:
+            if len(embs) == 0:
+                return None
+            first = embs[0]
+        except TypeError:
+            return None
         if first is None:
             return None
         try:
-            return len(first)
+            return int(len(first))
         except TypeError:
             return None
 
