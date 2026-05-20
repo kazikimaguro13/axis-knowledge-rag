@@ -521,7 +521,7 @@ class RAGPipeline:
         max_tokens: int = 1024,
         store: ConversationStore | None = None,
         rewriter_enabled: bool = True,
-        rewriter_model: str = "gemini-1.5-flash",
+        rewriter_model: str = "gemini-2.5-flash",
         history_turns: int = 6,
     ) -> ChatResponse:
         """Single-turn chat that keeps history under ``session_id``.

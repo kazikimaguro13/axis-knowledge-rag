@@ -102,7 +102,7 @@ class RAGConfig:
 @dataclass(frozen=True)
 class ChatRewriterConfig:
     enabled: bool = True
-    model: str = "gemini-1.5-flash"
+    model: str = "gemini-2.5-flash"
 
 
 # ---------------------------------------------------------------------------
