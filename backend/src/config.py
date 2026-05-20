@@ -168,16 +168,27 @@ class EmbedderConfig:
 
 
 @dataclass(frozen=True)
+class GeminiGenConfig:
+    """Connection settings for the Gemini generation backend (spec_052)."""
+
+    model: str = "gemini-2.5-flash"
+
+
+@dataclass(frozen=True)
 class GenerationConfig:
     """Selects which generation backend ``make_generation_backend()`` builds.
 
-    ``backend``: ``"claude"`` (v0.8.1 default) | ``"ollama"`` | ``"dummy"``.
+    ``backend``: ``"auto"`` (v0.9.1 default — Claude > Gemini > DUMMY) |
+    ``"claude"`` | ``"gemini"`` | ``"ollama"`` | ``"dummy"``.
+    ``gemini``: model selection when ``backend="gemini"`` or ``auto`` falls
+    through to Gemini.
     ``ollama``: connection settings when ``backend="ollama"``. ``llama3``
     is a sensible default; swap for ``llama3:70b`` / ``mistral`` etc. via
     ``config.yml``.
     """
 
-    backend: str = "claude"
+    backend: str = "auto"
+    gemini: GeminiGenConfig = field(default_factory=GeminiGenConfig)
     ollama: OllamaConfig = field(default_factory=lambda: OllamaConfig(model="llama3"))
 
 
@@ -301,6 +312,7 @@ def _build_app_config(raw: dict) -> AppConfig:
     emb_ollama_raw = (emb_raw.get("ollama") or {}) if isinstance(emb_raw, dict) else {}
     gen_raw = (raw.get("generation") or {}) if isinstance(raw, dict) else {}
     gen_ollama_raw = (gen_raw.get("ollama") or {}) if isinstance(gen_raw, dict) else {}
+    gen_gemini_raw = (gen_raw.get("gemini") or {}) if isinstance(gen_raw, dict) else {}
     feedback_raw = (raw.get("feedback") or {}) if isinstance(raw, dict) else {}
     gap_raw = (raw.get("gap") or {}) if isinstance(raw, dict) else {}
 
@@ -364,6 +376,9 @@ def _build_app_config(raw: dict) -> AppConfig:
     gen_default = GenerationConfig()
     generation = GenerationConfig(
         backend=str(gen_raw.get("backend", gen_default.backend)),
+        gemini=GeminiGenConfig(
+            model=str(gen_gemini_raw.get("model", gen_default.gemini.model)),
+        ),
         ollama=OllamaConfig(
             model=str(gen_ollama_raw.get("model", gen_default.ollama.model)),
             url=str(gen_ollama_raw.get("url", gen_default.ollama.url)),
