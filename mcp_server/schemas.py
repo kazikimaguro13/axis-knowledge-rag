@@ -146,6 +146,15 @@ class NeighborsInput(_BaseInput):
         default="both",
         description="'out' (this doc's refs), 'in' (docs that reference this), or 'both'.",
     )
+    bidirectional: bool = Field(
+        default=False,
+        description=(
+            "spec_049: when true, ignore ``direction`` and return both forwardlinks "
+            "(this doc's refs) and backlinks (docs that ref this) in one Obsidian-"
+            "style payload. Backward-compatible: default false preserves the legacy "
+            "single-direction shape."
+        ),
+    )
     response_format: ResponseFormat = Field(default=ResponseFormat.MARKDOWN)
 
 

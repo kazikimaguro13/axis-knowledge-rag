@@ -1,12 +1,16 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { fetchNeighbors, type NeighborPayload } from "@/lib/graphClient";
+import {
+  fetchNeighborsBidirectional,
+  type GraphNode,
+  type NeighborSet,
+} from "@/lib/graphClient";
 
 type Props = { docId: string | null; onClose: () => void };
 
 export function GraphSidebar({ docId, onClose }: Props) {
-  const [data, setData] = useState<NeighborPayload | null>(null);
+  const [data, setData] = useState<NeighborSet | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -18,7 +22,7 @@ export function GraphSidebar({ docId, onClose }: Props) {
     setData(null);
     setError(null);
     let cancelled = false;
-    fetchNeighbors(docId, 1, 20)
+    fetchNeighborsBidirectional(docId, 1, 20)
       .then((res) => {
         if (!cancelled) setData(res);
       })
@@ -59,10 +63,12 @@ export function GraphSidebar({ docId, onClose }: Props) {
       {!error && !data && <p className="text-slate-400">Loading...</p>}
       {data && (
         <>
-          <h3 className="text-base font-semibold">{data.center.title || data.center.id}</h3>
+          <h3 className="text-base font-semibold">
+            {data.center.title || data.center.id}
+          </h3>
           <p className="mb-3 text-xs text-slate-500">
-            <code>{data.center.id}</code> · in_degree {data.center.in_degree} / out_degree{" "}
-            {data.center.out_degree}
+            <code>{data.center.id}</code> · in_degree {data.center.in_degree} /
+            out_degree {data.center.out_degree}
           </p>
           <div className="mb-4 flex flex-wrap gap-1">
             {Object.entries(data.center.axes).map(([k, v]) => (
@@ -74,25 +80,54 @@ export function GraphSidebar({ docId, onClose }: Props) {
               </span>
             ))}
           </div>
-          <h4 className="mb-2 text-sm font-semibold">
-            🔗 隣接 ({data.neighbors.length})
-          </h4>
-          {data.neighbors.length === 0 ? (
+
+          {data.forwardlinks.length > 0 && (
+            <NeighborSection
+              heading={`→ 参照している (${data.forwardlinks.length})`}
+              ariaLabel="このドキュメントが参照しているドキュメント"
+              nodes={data.forwardlinks}
+            />
+          )}
+
+          {data.backlinks.length > 0 && (
+            <NeighborSection
+              heading={`← 参照されている (${data.backlinks.length})`}
+              ariaLabel="このドキュメントを参照しているドキュメント"
+              nodes={data.backlinks}
+            />
+          )}
+
+          {data.forwardlinks.length === 0 && data.backlinks.length === 0 && (
             <p className="text-xs text-slate-400">
-              hop=1 で到達できるドキュメントはありません。
+              このドキュメントは独立ノードです (リンク無し)。
             </p>
-          ) : (
-            <ul className="space-y-1">
-              {data.neighbors.map((n) => (
-                <li key={n.id} className="text-xs">
-                  <span className="font-medium">{n.title || n.id}</span>
-                  <span className="ml-1 text-slate-400">({n.id})</span>
-                </li>
-              ))}
-            </ul>
           )}
         </>
       )}
     </aside>
+  );
+}
+
+function NeighborSection({
+  heading,
+  ariaLabel,
+  nodes,
+}: {
+  heading: string;
+  ariaLabel: string;
+  nodes: GraphNode[];
+}) {
+  return (
+    <section className="mb-4" aria-label={ariaLabel}>
+      <h4 className="mb-2 text-sm font-semibold">{heading}</h4>
+      <ul className="space-y-1">
+        {nodes.map((n) => (
+          <li key={n.id} className="text-xs">
+            <span className="font-medium">{n.title || n.id}</span>
+            <span className="ml-1 text-slate-400">({n.id})</span>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }

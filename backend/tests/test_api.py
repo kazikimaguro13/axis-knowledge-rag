@@ -168,6 +168,41 @@ def test_get_neighbors_unknown_doc_returns_404() -> None:
 
 
 # ---------------------------------------------------------------------------
+# spec_049: direction query param (out / in / both)
+# ---------------------------------------------------------------------------
+
+
+def test_neighbors_direction_out_only() -> None:
+    """doc_002 has refs:[doc_001] — direction=out should return only doc_001."""
+    with TestClient(app) as client:
+        resp = client.get("/api/graph/doc_002/neighbors?direction=out&hop=1")
+        assert resp.status_code == 200
+        ids = {n["id"] for n in resp.json()["neighbors"]}
+        assert ids == {"doc_001"}
+
+
+def test_neighbors_direction_in_only() -> None:
+    """doc_001 is referenced by doc_002 / doc_004 / doc_007 — direction=in returns them."""
+    with TestClient(app) as client:
+        resp = client.get("/api/graph/doc_001/neighbors?direction=in&hop=1")
+        assert resp.status_code == 200
+        ids = {n["id"] for n in resp.json()["neighbors"]}
+        assert {"doc_002", "doc_004", "doc_007"} <= ids
+        # doc_001 has no outgoing refs, so nothing extra should leak in.
+        assert all(i in {"doc_002", "doc_004", "doc_007"} for i in ids)
+
+
+def test_neighbors_direction_both_default() -> None:
+    """No direction param ⇒ both (backward-compat with pre-spec_049 callers)."""
+    with TestClient(app) as client:
+        no_param = client.get("/api/graph/doc_002/neighbors?hop=1").json()
+        both = client.get("/api/graph/doc_002/neighbors?direction=both&hop=1").json()
+        assert {n["id"] for n in no_param["neighbors"]} == {
+            n["id"] for n in both["neighbors"]
+        }
+
+
+# ---------------------------------------------------------------------------
 # spec_046: /api/ingest — browser-extension capture
 # ---------------------------------------------------------------------------
 

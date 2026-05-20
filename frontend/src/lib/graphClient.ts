@@ -57,10 +57,12 @@ export async function fetchNeighbors(
   docId: string,
   hop = 1,
   maxNeighbors = 20,
+  direction: "in" | "out" | "both" = "both",
 ): Promise<NeighborPayload> {
   const params = new URLSearchParams({
     hop: String(hop),
     max_neighbors: String(maxNeighbors),
+    direction,
   });
   const res = await fetch(
     `${API_BASE}/api/graph/${encodeURIComponent(docId)}/neighbors?${params.toString()}`,
@@ -69,4 +71,32 @@ export async function fetchNeighbors(
     throw new Error(`/api/graph/${docId}/neighbors failed: ${res.status}`);
   }
   return (await res.json()) as NeighborPayload;
+}
+
+// spec_049: Obsidian-style bidirectional refs.
+//   forwardlinks = docs this doc refs (direction=out)
+//   backlinks    = docs that ref this doc (direction=in)
+// Fetched in parallel so wall-clock latency matches the single-call version.
+export interface NeighborSet {
+  center: GraphNode;
+  forwardlinks: GraphNode[];
+  backlinks: GraphNode[];
+  hop: number;
+}
+
+export async function fetchNeighborsBidirectional(
+  docId: string,
+  hop = 1,
+  maxNeighbors = 20,
+): Promise<NeighborSet> {
+  const [outRes, inRes] = await Promise.all([
+    fetchNeighbors(docId, hop, maxNeighbors, "out"),
+    fetchNeighbors(docId, hop, maxNeighbors, "in"),
+  ]);
+  return {
+    center: outRes.center,
+    forwardlinks: outRes.neighbors,
+    backlinks: inRes.neighbors,
+    hop,
+  };
 }
