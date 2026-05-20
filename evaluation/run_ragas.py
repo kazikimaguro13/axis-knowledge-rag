@@ -17,6 +17,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 from datasets import Dataset
 from ragas import RunConfig, evaluate
 from ragas.metrics import (
@@ -116,7 +117,13 @@ def main() -> int:
         run_config=RunConfig(max_workers=2, max_retries=15, timeout=120),
     )
 
-    scores = {m.name: float(result[m.name]) for m in METRICS}
+    # ragas v0.4 returns per-row lists; aggregate to scalar (ignore NaN from failed judge calls)
+    def _to_scalar(v):
+        if hasattr(v, '__iter__') and not isinstance(v, str):
+            arr = np.array(list(v), dtype=float)
+            return float(np.nanmean(arr)) if arr.size else float('nan')
+        return float(v)
+    scores = {m.name: _to_scalar(result[m.name]) for m in METRICS}
     record: dict[str, Any] = {
         "timestamp": datetime.now(UTC).isoformat(),
         "git_sha": _git_sha(),
