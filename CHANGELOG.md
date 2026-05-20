@@ -2,6 +2,49 @@
 
 ## [Unreleased]
 
+### Day 46 (2026-05-20) — Browser extension MVP (spec_046)
+
+v0.9.0 marquee #2: one-click web page → `examples/knowledge/`. Reading an
+article and "kind of meaning to" save it now takes one click instead of
+three steps in a memo app.
+
+- **POST /api/ingest** (`backend/src/api.py`) — new endpoint accepting
+  `{url, title, body, selected_text?}` and writing
+  `examples/knowledge/web_YYYYMMDD_HHMMSS_<slug>.md` via the new
+  `backend/src/ingest_web.py` writer. Returns `{saved_path, doc_id}`.
+  Validation: `url`/`title` required + length-bounded, large bodies
+  capped at 200K chars at the Pydantic layer
+- **CORS regex** (`backend/src/api.py`) — the previous literal allow-list
+  (`localhost:3000`, `localhost:8501`) is replaced with an
+  `allow_origin_regex` matching `chrome-extension://*` plus any
+  `localhost` / `127.0.0.1` port. `allow_credentials` flipped to
+  `False`; existing frontend / Streamlit clients keep working since
+  they never sent cross-origin credentials
+- **browser-extension/** — new Chrome MV3 unpacked extension:
+  `manifest.json` (MV3 with `activeTab`/`scripting`/`storage`
+  permissions), `popup.{html,css,js}`, `background.js` (service worker
+  seeding the default endpoint on install), `icon-{16,48,128}.png` (PIL
+  placeholder, indigo). Popup prefers `window.getSelection()` over
+  `document.body.innerText` (cap 5,000 chars) so a deliberate selection
+  beats the full-page dump. Endpoint URL is configurable via
+  `chrome.storage.sync`, defaulting to `http://localhost:8000`
+- **schemas**: `IngestRequest` / `IngestResponse` added to
+  `backend/src/schemas.py`
+- **slug**: NFKC + Unicode `\w` so kana / kanji survive in filenames
+  (`Ｗｅｂ 記事 サンプル` → `web-記事-サンプル`); empty / all-stripped
+  inputs fall back to the `web` sentinel
+- **tests**: `backend/tests/test_ingest_web.py` (8 — frontmatter shape,
+  slugify JP/ASCII/empty/edge, filename timestamp, selection priority,
+  auto-mkdir, axes defaults, refs empty list, url verbatim);
+  `backend/tests/test_api.py` (+2 — `/api/ingest` happy path with a
+  tmp-dir override, 422 on missing / empty fields). Existing 372 +
+  spec_046 10 = **382 件 PASS**, 2 skipped (redis + ollama optional
+  deps), ruff 緑
+- **docs**: ADR-027 (rationale, alternatives, CORS / extraction
+  consequences), `docs/browser-extension.md` (install / usage /
+  troubleshooting / permissions table), `browser-extension/README.md`
+  (developer-facing install steps), README.md Features bullet
+
 ### Day 45 (2026-05-19) — Ollama / Llama.cpp integration (spec_045)
 
 v0.9.0 marquee #1: fully on-prem RAG. Both the embedder and the

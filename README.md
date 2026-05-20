@@ -30,6 +30,7 @@ YAML frontmatter 付き Markdown ナレッジに対する、**軸メタデータ
 - 🇯🇵 **日本語ナレッジ特化** — 表記ゆれ吸収 (NFKC + カナ統一 + lowercase) 標準搭載
 - 🔌 **LangChain / LlamaIndex 不使用、自前実装** — 依存が薄く、内部挙動が読める。Embedder / VectorStore / RAG Pipeline を必要最小限の薄いラッパで構成
 - 🏠 **Local-first 設計** — ChromaDB はローカル永続、API キー未設定でも DUMMY モードで動作確認可能。個人ナレッジを外部送信しない
+- 🌐 **Browser Extension (Chrome MV3)** — 閲覧中の記事をワンクリックで `examples/knowledge/` に YAML+Markdown 化。`POST /api/ingest` + 選択範囲優先キャプチャ (v0.9, [ADR-027](docs/adr/ADR-027-browser-extension.md) / [docs/browser-extension.md](docs/browser-extension.md))
 
 ---
 
