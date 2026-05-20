@@ -113,7 +113,7 @@ def main() -> int:
         metrics=METRICS,
         llm=get_judge_llm(),
         embeddings=get_judge_embeddings(),
-        run_config=RunConfig(max_workers=4, max_retries=10, timeout=60),
+        run_config=RunConfig(max_workers=2, max_retries=15, timeout=120),
     )
 
     scores = {m.name: float(result[m.name]) for m in METRICS}

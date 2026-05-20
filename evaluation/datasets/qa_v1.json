@@ -7,175 +7,45 @@
       "id": "qa_001",
       "question": "RAG とは何か、3 行で説明してください",
       "ground_truth": "RAG (Retrieval-Augmented Generation) は、外部知識を検索して生成 AI のプロンプトに含めることで、ハルシネーションを減らし最新情報を反映できる手法。検索 → 文脈付与 → 生成の 3 段階で構成される。本プロジェクトでは軸メタデータフィルタとベクトル類似度のハイブリッド検索をコアとしている。",
-      "expected_contexts": ["01-rag-patterns.md"],
+      "expected_contexts": [
+        "01-rag-patterns.md"
+      ],
       "axes": null
     },
     {
       "id": "qa_002",
       "question": "ベクトル検索とは何か？本プロジェクトではどの埋め込みモデルを使っているか？",
       "ground_truth": "ベクトル検索は、テキストを埋め込みモデルで固定次元のベクトルに写像し、クエリベクトルとの類似度で文書を並べる手法。本プロジェクトでは Gemini text-embedding-004 (768 次元) を採用し、永続層に ChromaDB を使用している。",
-      "expected_contexts": ["02-vector-search.md"],
+      "expected_contexts": [
+        "02-vector-search.md"
+      ],
       "axes": null
     },
     {
       "id": "qa_003",
       "question": "YAML frontmatter とは何か？なぜナレッジ表現に採用しているのか？",
       "ground_truth": "YAML frontmatter は Markdown 冒頭の `---` 区切り YAML ブロックで、プレーンテキストの可搬性を保ちつつ機械可読な構造を持たせる形式。Jekyll や Hugo で広まった。本プロジェクトでは軸 (axes) と自由タグ (tags) を構造化して記述できるため採用している。",
-      "expected_contexts": ["03-yaml-frontmatter.md"],
+      "expected_contexts": [
+        "03-yaml-frontmatter.md"
+      ],
       "axes": null
     },
     {
       "id": "qa_004",
       "question": "Claude API と Skills とはそれぞれ何か？",
       "ground_truth": "Claude API はテキスト生成・推論・ツール呼び出しといった LLM 機能を直接叩くインターフェース。Skills は特定タスク向けに手順・知識・サンプルをパッケージ化した「再利用可能な能力」で、両者はレイヤーが異なり競合しない。",
-      "expected_contexts": ["04-claude-skills.md"],
+      "expected_contexts": [
+        "04-claude-skills.md"
+      ],
       "axes": null
     },
     {
       "id": "qa_005",
       "question": "プロンプトエンジニアリングとは何か？業務システムで効く原則を教えてください",
       "ground_truth": "プロンプトエンジニアリングは LLM への入力をどう設計すれば期待出力を安定して引き出せるかを扱う実務領域。業務では①役割と制約を冒頭で固定する、②出力フォーマットを例示する、③否定形より肯定形で書く、の 3 原則が効く。",
-      "expected_contexts": ["05-prompt-engineering.md"],
-      "axes": null
-    },
-    {
-      "id": "qa_006",
-      "question": "ベクトル検索と全文検索 (BM25) の違いは？",
-      "ground_truth": "ベクトル検索は意味の近さで類似度を測り、BM25 は語彙の出現頻度で類似度を測る。ベクトルは同義語・言い換えに強く、BM25 は固有名詞や明示的キーワードに強い。本プロジェクトでは両者をハイブリッドして補完させている。",
-      "expected_contexts": ["01-rag-patterns.md", "02-vector-search.md"],
-      "axes": null
-    },
-    {
-      "id": "qa_007",
-      "question": "コサイン類似度と L2 距離 (ユークリッド距離) の違いは？テキスト埋め込みにはどちらが適しているか？",
-      "ground_truth": "コサイン類似度はベクトルの向き（方向）だけを見て類似度を測り、L2 距離は大きさ込みで距離を測る。テキスト埋め込みでは文の長さ差で L2 距離が大きく揺れるため、方向だけ見るコサイン類似度の方が適している。ChromaDB のデフォルト距離尺度もコサイン類似度。",
-      "expected_contexts": ["02-vector-search.md"],
-      "axes": null
-    },
-    {
-      "id": "qa_008",
-      "question": "軸 (axes) と自由タグ (tags) の違いは？検索での使い分けは？",
-      "ground_truth": "軸 (axes) は事前定義スキーマで enum や型を持つ構造化フィールド。tags は語彙統制なしで自由に付けられる。検索では軸をファセットフィルタ、tags を補助的なキーワード検索に使う。",
-      "expected_contexts": ["03-yaml-frontmatter.md"],
-      "axes": null
-    },
-    {
-      "id": "qa_009",
-      "question": "Claude API と Skills はどう使い分けるか？",
-      "ground_truth": "ワンショットの生成や要約には API を直接呼ぶのが軽量で予測可能。複数ステップの定型ワークフロー（コードレビュー、テスト生成など）は Skills 側に手順を集約すると再現性と保守性が上がる。本プロジェクトの RAG 機能は前者寄りで最小限のラッパで Claude API を叩く。",
-      "expected_contexts": ["04-claude-skills.md"],
-      "axes": null
-    },
-    {
-      "id": "qa_010",
-      "question": "プロンプトで否定形と肯定形の指示ではどちらが望ましいか？その理由は？",
-      "ground_truth": "肯定形の方が望ましい。「〜してはいけない」という否定形は守られにくく、「常に〜する」という肯定形の方が出力が安定する。これはプロンプトエンジニアリングの実務原則の一つ。",
-      "expected_contexts": ["05-prompt-engineering.md"],
-      "axes": null
-    },
-    {
-      "id": "qa_011",
-      "question": "なぜ RAG ではドキュメントをチャンク分割するのか？その際の課題は？",
-      "ground_truth": "ドキュメント単位では文脈は豊富だがノイズで関連度が薄まる。チャンク単位にすると関連度は鋭くなる代わりに前後文脈を失い誤読しやすくなる。実務では章・節単位で軽く区切りヘッダ階層をメタデータとして残す折衷案が安定する。",
-      "expected_contexts": ["01-rag-patterns.md"],
-      "axes": null
-    },
-    {
-      "id": "qa_012",
-      "question": "なぜベクトル検索でコサイン類似度を採用するのか？実装上の注意点は？",
-      "ground_truth": "テキスト埋め込みでは文の長さ差で L2 距離が大きく揺れるため、方向だけ見るコサイン類似度を採用する。実装上の落とし穴は「インデックス時の正規化忘れ」で、自前で類似度計算する場合は明示的に L2 正規化してから内積を取る必要がある。",
-      "expected_contexts": ["02-vector-search.md"],
-      "axes": null
-    },
-    {
-      "id": "qa_013",
-      "question": "なぜ YAML frontmatter に id と refs フィールドを設けるのか？",
-      "ground_truth": "`id` はファイルリネームに耐える不変の一意キー。`refs` による相互参照は後段で参照グラフを構築したり壊れリンクを検出するために使う。`id` が安定していることで参照整合性チェック（integrity.py）が実装できる。",
-      "expected_contexts": ["03-yaml-frontmatter.md"],
-      "axes": null
-    },
-    {
-      "id": "qa_014",
-      "question": "なぜ複数ステップのワークフローには Skills を使う方がよいのか？",
-      "ground_truth": "複数ステップにわたる定型ワークフローは Skills 側に手順を集約すると再現性と保守性が上がる。Claude API を直接叩く場合はワンショットで軽量・予測可能だが、手順が多いと管理が難しくなる。",
-      "expected_contexts": ["04-claude-skills.md"],
-      "axes": null
-    },
-    {
-      "id": "qa_015",
-      "question": "なぜ RAG のプロンプトで出典を構造化タグで囲む必要があるのか？",
-      "ground_truth": "出典を `<source id=\"doc_001\">...</source>` のような構造化タグで囲み「出典 ID を必ず引用する」と指示すると、ハルシネーション率がはっきり下がる。後段で出典リンクを UI に表示する際にも ID が手がかりになるため実装上も重要。",
-      "expected_contexts": ["05-prompt-engineering.md"],
-      "axes": null
-    },
-    {
-      "id": "qa_016",
-      "question": "軸フィルタとベクトル検索のハイブリッド検索はどう実装するか？",
-      "ground_truth": "まず軸メタデータで候補集合を絞り（ChromaDB の where 句）、その上でベクトル類似度を計算する。これが計算量的に最も素直な実装。本プロジェクトでは軸フィルタ + ベクトル類似度のハイブリッドをコアに据えており、さらに BM25 との 3-way fusion も実装している。",
-      "expected_contexts": ["01-rag-patterns.md", "02-vector-search.md"],
-      "axes": null
-    },
-    {
-      "id": "qa_017",
-      "question": "ChromaDB で軸メタデータフィルタを使うにはどうするか？複数条件の場合は？",
-      "ground_truth": "ChromaDB の `where` 句で軸フィルタを指定する。単一条件は `{\"axis_category\": \"技術記事\"}` のように書き、複数条件は `{\"$and\": [{...}, {...}]}` を使う（Chroma 0.5 は複数キーの場合に明示的な $and が必要）。",
-      "expected_contexts": ["02-vector-search.md"],
-      "axes": null
-    },
-    {
-      "id": "qa_018",
-      "question": "YAML frontmatter の id と refs を使って相互参照グラフをどう構築するか？",
-      "ground_truth": "`id` を不変の一意キーとして各ドキュメントに付与し、`refs: [doc_001]` のように他ドキュメントを参照する。これを読み込んで有向グラフを構築し、参照先 id が存在しない場合は壊れリンクとして検出できる（integrity.py の役割）。",
-      "expected_contexts": ["03-yaml-frontmatter.md"],
-      "axes": null
-    },
-    {
-      "id": "qa_019",
-      "question": "RAG システム向けのプロンプトをどう設計するか？出典の扱い方を含めて教えてください",
-      "ground_truth": "①役割と制約を冒頭で固定し②出力フォーマットを例示する。出典は `<source id=\"doc_001\">...</source>` のような構造化タグで囲み、「出典 ID を必ず引用する」と指示する。否定形より肯定形で書くことで遵守率が高まる。",
-      "expected_contexts": ["05-prompt-engineering.md"],
-      "axes": null
-    },
-    {
-      "id": "qa_020",
-      "question": "RAG で検索結果を合成する際のコンテキストウィンドウ管理はどうするか？",
-      "ground_truth": "素朴な concat ではコンテキストウィンドウをすぐ食い潰す。上位スコアを優先しつつ、軸メタデータによるリランクや重複排除を行う。本プロジェクトでは「軸フィルタ + ベクトル類似度のハイブリッド」で関連度の高い文書のみを絞り込む設計としている。",
-      "expected_contexts": ["01-rag-patterns.md"],
-      "axes": null
-    },
-    {
-      "id": "qa_021",
-      "question": "level が「上級」のドキュメントには何がありますか？",
-      "ground_truth": "level「上級」のドキュメントには、プロンプトエンジニアリングの実務原則 (doc_005) が該当する。",
-      "expected_contexts": ["05-prompt-engineering.md"],
-      "axes": {"level": "上級"}
-    },
-    {
-      "id": "qa_022",
-      "question": "doc_999 というドキュメントは知識ベースに存在しますか？",
-      "ground_truth": "doc_999 は知識ベースに存在しない。doc_005 の refs に doc_999 が記載されているが、これは Week 2 で実装する参照整合性チェックの動作検証用サンプルとして意図的に含まれた壊れリンクである。",
-      "expected_contexts": ["05-prompt-engineering.md"],
-      "axes": null
-    },
-    {
-      "id": "qa_023",
-      "question": "category が「メモ」のドキュメントは何ですか？その内容は？",
-      "ground_truth": "category「メモ」には「YAML frontmatter によるメタデータ設計」(doc_003) が該当する。軸と自由タグの設計、id・refs による相互参照について解説している。",
-      "expected_contexts": ["03-yaml-frontmatter.md"],
-      "axes": {"category": "メモ"}
-    },
-    {
-      "id": "qa_024",
-      "question": "Gemini text-embedding-004 の次元数はいくつですか？",
-      "ground_truth": "Gemini text-embedding-004 は 768 次元のベクトルを生成する。本プロジェクトはこれを採用して ChromaDB に保存している。",
-      "expected_contexts": ["02-vector-search.md"],
-      "axes": null
-    },
-    {
-      "id": "qa_025",
-      "question": "OAuth 2.1 の実装方法についてこの知識ベースで解説されていますか？",
-      "ground_truth": "提供された資料には OAuth 2.1 の実装方法に関する記載はありません。",
-      "expected_contexts": [],
+      "expected_contexts": [
+        "05-prompt-engineering.md"
+      ],
       "axes": null
     }
   ]
