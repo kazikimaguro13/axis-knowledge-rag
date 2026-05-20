@@ -247,6 +247,73 @@ class ClaudeBackend:
         return "".join(b.text for b in resp.content if hasattr(b, "text"))
 
 
+class GeminiBackend:
+    """Gemini chat backend (spec_052).
+
+    Reuses ``google-generativeai`` (already a hard dep for the embedder) so
+    deployments that have ``GEMINI_API_KEY`` set but lack
+    ``ANTHROPIC_API_KEY`` can still get a real generation step instead of
+    falling all the way to DUMMY. The factory wires this in automatically
+    via ``generation.backend="auto"``.
+    """
+
+    DEFAULT_MODEL = "gemini-2.5-flash"
+
+    def __init__(
+        self,
+        *,
+        model: str = DEFAULT_MODEL,
+        api_key: str | None = None,
+    ) -> None:
+        import google.generativeai as genai
+
+        self._api_key = api_key or settings.gemini_api_key or os.environ.get(
+            "GEMINI_API_KEY", ""
+        )
+        if not self._api_key:
+            raise RuntimeError("GEMINI_API_KEY not set for GeminiBackend")
+        genai.configure(api_key=self._api_key)
+        self._model = model
+        self._client = genai.GenerativeModel(model)
+
+    @property
+    def model_name(self) -> str:
+        return self._model
+
+    @property
+    def is_dummy(self) -> bool:
+        return False
+
+    def generate(
+        self,
+        system: str,
+        messages: list[dict[str, str]],
+        *,
+        max_tokens: int = 1024,
+    ) -> str:
+        # Gemini has a ``system_instruction`` parameter, but encoding the
+        # system + roles into the prompt body keeps the call site
+        # provider-agnostic and avoids per-SDK-version drift in how
+        # ``system_instruction`` is consumed. Citation behaviour is identical.
+        parts: list[str] = []
+        if system:
+            parts.append(f"[SYSTEM]\n{system}\n\n")
+        for m in messages:
+            role = (m.get("role") or "user").upper()
+            content = m.get("content", "")
+            parts.append(f"[{role}]\n{content}\n\n")
+        prompt = "".join(parts).rstrip()
+
+        resp = self._client.generate_content(
+            prompt,
+            generation_config={
+                "max_output_tokens": max_tokens,
+                "temperature": 0.2,
+            },
+        )
+        return getattr(resp, "text", "") or ""
+
+
 class OllamaBackend:
     """Ollama ``/api/chat`` backend (spec_045 fully on-prem path)."""
 
@@ -316,18 +383,26 @@ class DummyGenerationBackend:
 def make_generation_backend(cfg: GenerationConfig | None = None) -> GenerationBackend:
     """Build a :class:`GenerationBackend` from :class:`GenerationConfig`.
 
-    - ``cfg is None`` → defaults (``backend="claude"``).
-    - ``backend="claude"``: Anthropic client; auto-falls back to dummy when
+    - ``cfg is None`` → defaults (``backend="auto"``).
+    - ``backend="auto"`` (spec_052 default): prefer Claude when
+      ``ANTHROPIC_API_KEY`` is set, else Gemini when ``GEMINI_API_KEY`` is
+      set, else DUMMY. Lets users without an Anthropic key still get a
+      real generation step from the Gemini key they already had for the
+      embedder.
+    - ``backend="claude"``: Anthropic client; auto-falls back to DUMMY when
       ``ANTHROPIC_API_KEY`` is missing (v0.8.1 behaviour).
-    - ``backend="ollama"``: spec_045 on-prem chat path. Falls back to dummy
+    - ``backend="gemini"``: ``google-generativeai`` chat. Falls back to
+      DUMMY on missing key / SDK error.
+    - ``backend="ollama"``: spec_045 on-prem chat path. Falls back to DUMMY
       on ImportError / connection failure so callers never crash at startup.
-    - ``backend="dummy"``: explicit dummy.
+    - ``backend="dummy"``: explicit DUMMY.
     """
     if cfg is None:
         from backend.src.config import GenerationConfig as _GC
 
         cfg = _GC()
-    backend = (cfg.backend or "claude").lower()
+    backend = (cfg.backend or "auto").lower()
+
     if backend == "ollama":
         try:
             return OllamaBackend(model=cfg.ollama.model, url=cfg.ollama.url)
@@ -336,14 +411,48 @@ def make_generation_backend(cfg: GenerationConfig | None = None) -> GenerationBa
                 "Ollama generation backend failed (%s), falling back to DUMMY", e
             )
             return DummyGenerationBackend()
+
+    if backend == "gemini":
+        gemini_model = getattr(getattr(cfg, "gemini", None), "model", GeminiBackend.DEFAULT_MODEL)
+        try:
+            return GeminiBackend(model=gemini_model)
+        except Exception as e:  # noqa: BLE001
+            logger.warning(
+                "Gemini generation backend failed (%s), falling back to DUMMY", e
+            )
+            return DummyGenerationBackend()
+
     if backend == "dummy":
         return DummyGenerationBackend()
-    if not settings.anthropic_api_key:
-        logger.warning("RAGPipeline running in DUMMY mode (no ANTHROPIC_API_KEY)")
+
+    if backend == "auto":
+        if settings.anthropic_api_key:
+            return ClaudeBackend(model=DEFAULT_MODEL)
+        if settings.gemini_api_key:
+            gemini_model = getattr(
+                getattr(cfg, "gemini", None), "model", GeminiBackend.DEFAULT_MODEL
+            )
+            try:
+                return GeminiBackend(model=gemini_model)
+            except Exception as e:  # noqa: BLE001
+                logger.warning(
+                    "auto: Gemini generation backend failed (%s), falling back to DUMMY",
+                    e,
+                )
+                return DummyGenerationBackend()
+        logger.warning(
+            "auto: no ANTHROPIC_API_KEY or GEMINI_API_KEY → DUMMY generation"
+        )
         return DummyGenerationBackend()
-    if backend != "claude":
-        logger.warning("Unknown generation backend %r, falling back to claude", backend)
-    return ClaudeBackend(model=DEFAULT_MODEL)
+
+    if backend == "claude":
+        if not settings.anthropic_api_key:
+            logger.warning("RAGPipeline running in DUMMY mode (no ANTHROPIC_API_KEY)")
+            return DummyGenerationBackend()
+        return ClaudeBackend(model=DEFAULT_MODEL)
+
+    logger.warning("Unknown generation backend %r, falling back to DUMMY", backend)
+    return DummyGenerationBackend()
 
 
 class RAGPipeline:
@@ -394,13 +503,15 @@ class RAGPipeline:
 
     @property
     def backend_name(self) -> str:
-        """Short label for telemetry: ``CLAUDE`` / ``OLLAMA`` / ``DUMMY``."""
+        """Short label for telemetry: ``CLAUDE`` / ``GEMINI`` / ``OLLAMA`` / ``DUMMY``."""
         if self._backend.is_dummy:
             return "DUMMY"
         if isinstance(self._backend, OllamaBackend):
             return "OLLAMA"
         if isinstance(self._backend, ClaudeBackend):
             return "CLAUDE"
+        if isinstance(self._backend, GeminiBackend):
+            return "GEMINI"
         return type(self._backend).__name__.upper()
 
     def _call_generation(

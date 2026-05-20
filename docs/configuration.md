@@ -129,23 +129,51 @@ embedder:
 
 ---
 
-## `generation` (spec_045)
+## `generation` (spec_045 + spec_052)
 
 Selects the LLM backend used by the RAG pipeline.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `backend` | string | `"claude"` | `"claude"` (v0.8.1 default, Anthropic SDK) / `"ollama"` (fully on-prem) / `"dummy"`. |
+| `backend` | string | `"auto"` | `"auto"` (v0.9.1 default — Claude > Gemini > DUMMY) / `"claude"` (Anthropic SDK) / `"gemini"` (Google `google-generativeai`) / `"ollama"` (fully on-prem) / `"dummy"`. |
+| `gemini.model` | string | `"gemini-2.5-flash"` | Gemini chat model. Used when `backend="gemini"` or when `auto` falls through to Gemini. |
 | `ollama.model` | string | `"llama3"` | Ollama chat model. Try `llama3:70b` / `qwen2.5:14b` for higher quality. |
 | `ollama.url` | string | `"http://localhost:11434"` | Ollama daemon URL. |
 
+### `"auto"` resolution (spec_052)
+
+When `backend: "auto"`, the factory picks at runtime:
+
+1. `ANTHROPIC_API_KEY` set → `ClaudeBackend`.
+2. Otherwise, `GEMINI_API_KEY` set → `GeminiBackend`.
+3. Otherwise → `DummyGenerationBackend`.
+
+This lets Cowork-plugin users who only have a Gemini key (needed for the
+embedder) still get real RAG answers without configuring a second LLM
+provider. Paid Claude users see no behaviour change — Claude still wins
+under `auto`.
+
+See [ADR-031](adr/ADR-031-gemini-generation-backend.md) for the design
+notes and migration path.
+
 When `backend="claude"` but `ANTHROPIC_API_KEY` is unset, the pipeline
 falls back to deterministic DUMMY answers (v0.8.1 behaviour preserved).
-Same applies to Ollama on connection failure — the user-facing UX never
-blocks; check logs for the warning if answers look unexpectedly dummy.
+Same applies to Gemini on missing key / SDK error and to Ollama on
+connection failure — the user-facing UX never blocks; check logs for
+the warning if answers look unexpectedly dummy.
 
 ```yaml
-# config.yml — example: Claude embedder, Ollama generation
+# config.yml — example A: pin Claude (existing v0.9.0 behaviour)
+generation:
+  backend: "claude"
+
+# config.yml — example B: pin Gemini explicitly
+generation:
+  backend: "gemini"
+  gemini:
+    model: "gemini-2.5-flash"
+
+# config.yml — example C: Claude embedder, Ollama generation
 embedder:
   backend: "gemini"
 generation:

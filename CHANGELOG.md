@@ -1,5 +1,41 @@
 # Changelog
 
+## [Unreleased]
+
+### Day 52 (2026-05-21) — Gemini generation backend + `auto` fallback (spec_052)
+
+v0.9.1 patch: add `GeminiBackend` and a new `"auto"` mode so users with
+only a `GEMINI_API_KEY` (the embedder requires it) stop getting DUMMY
+answers from `axis_answer` / `axis_chat`. Existing Claude users see no
+behaviour change.
+
+- **`backend/src/rag.py`** — new `GeminiBackend` class wrapping
+  `google.generativeai.GenerativeModel.generate_content`. System prompt
+  folded into the prompt body as `[SYSTEM]\n...\n\n` so the call site
+  stays provider-agnostic. Default model `gemini-2.5-flash`. Raises
+  `RuntimeError("GEMINI_API_KEY not set ...")` on construction when no
+  key is reachable; the factory catches that and falls back to DUMMY
+- **`backend/src/rag.py`** — `make_generation_backend(...)` gained
+  `"auto"` and `"gemini"` branches. Priority under `"auto"` is
+  **Claude > Gemini > DUMMY**: paid users keep Claude, Gemini-only users
+  finally get real answers, no-key users still get DUMMY. The
+  `backend_name` property now reports `GEMINI` for telemetry parity with
+  `CLAUDE` / `OLLAMA` / `DUMMY`
+- **`backend/src/config.py`** — new `GeminiGenConfig(model="gemini-2.5-flash")`.
+  `GenerationConfig.backend` default flipped from `"claude"` to `"auto"`.
+  `_build_app_config` reads `generation.gemini.model` from `config.yml`
+- **`config.yml`** — `generation.backend: "auto"` + `generation.gemini.model`
+  block. Comment block updated with the new priority chain
+- **tests**: `backend/tests/test_rag.py` +5 (init RuntimeError when no
+  key, generate-mock returns text, `auto` prefers Claude, `auto` falls
+  through to Gemini, `auto` returns DUMMY when neither key is set).
+  All 433 pre-existing tests still green → 438 total
+- **ADR-031** records the design (`auto` priority chain; rejected
+  alternatives: Gemini-as-default, Ollama-as-default, explicit-only;
+  consequences for un-keyed users; `google-generativeai` deprecation
+  path)
+- **version**: 0.9.0 → 0.9.1
+
 ## [0.9.0] - 2026-05-20
 
 v0.9.0 marquee release: 5 user-facing features (F1–F5) plus the
@@ -33,8 +69,6 @@ issues flagged in the final review.
 ### Tests
 - +7 tests (dim mismatch ×2, regex false-positive guard ×3, ingest
   token ×2). All 419 pre-existing tests still green → 426 total.
-
-## [Unreleased]
 
 ### Day 49 (2026-05-20) — Bidirectional refs in GraphSidebar (spec_049)
 
