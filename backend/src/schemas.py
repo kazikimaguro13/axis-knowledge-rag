@@ -197,3 +197,12 @@ class FeedbackResponse(BaseModel):
 
 class FeedbackReportResponse(BaseModel):
     markdown: str
+
+
+# ---------------------------------------------------------------------------
+# spec_048: knowledge-gap detection
+# ---------------------------------------------------------------------------
+
+
+class GapReportResponse(BaseModel):
+    markdown: str
