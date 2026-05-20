@@ -68,6 +68,23 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app_cfg = load_app_config()
     embedder = make_embedder(app_cfg.embedder)
     normalizer = Normalizer.from_config(load_axes_config())
+    # spec_051 HIGH-1: detect embedder ↔ index dim mismatch at startup.
+    # Empty store (probe returns None) skips silently — first ingest will
+    # set the dim. A mismatch is fatal because every subsequent query
+    # would crash inside Chroma with an opaque shape error.
+    try:
+        store_dim = store.probe_dim()
+    except Exception as e:  # noqa: BLE001
+        logger.warning("dim verification skipped: %s", e)
+        store_dim = None
+    if store_dim is not None and store_dim != embedder.dim:
+        raise RuntimeError(
+            f"Embedding dim mismatch: chroma store has dim={store_dim}, "
+            f"embedder ({type(embedder).__name__}) reports dim={embedder.dim}. "
+            f"config.yml で embedder.backend を変更した場合は "
+            f"`PYTHONPATH=. python3 -m scripts.build_index examples/knowledge --rebuild` "
+            f"を実行して index を rebuild してください。"
+        )
     pd = app_cfg.retrieval.parent_doc
     if pd.enabled and not store.has_parents():
         logger.warning(
