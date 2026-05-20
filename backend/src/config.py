@@ -216,6 +216,29 @@ class FeedbackConfig:
     db_path: str = "~/.axis_feedback.db"
 
 
+# ---------------------------------------------------------------------------
+# spec_048: knowledge-gap detection settings
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class GapConfig:
+    """Settings for the knowledge-gap detection store (spec_048).
+
+    Defaults: enabled, file-backed SQLite at ``~/.axis_gap.db``. Flip
+    ``enabled`` to False to make the ``search.py`` / ``rag.py`` hooks
+    no-op (zero added work on the hot path) and ``/api/gap/report``
+    return 503. ``low_score_threshold`` is the cosine-blended top score
+    below which a hit is considered "we kind of have it but probably
+    not what they wanted" — 0.35 chosen to match the v0.8 RAGAS eval's
+    "weak hit" band.
+    """
+
+    enabled: bool = True
+    db_path: str = "~/.axis_gap.db"
+    low_score_threshold: float = 0.35
+
+
 @dataclass(frozen=True)
 class AppConfig:
     """Aggregated runtime config (axes + retrieval + rag + chat + graph)."""
@@ -230,6 +253,8 @@ class AppConfig:
     generation: GenerationConfig = field(default_factory=GenerationConfig)
     # spec_047: 👍/👎 feedback store.
     feedback: FeedbackConfig = field(default_factory=FeedbackConfig)
+    # spec_048: knowledge-gap detection store.
+    gap: GapConfig = field(default_factory=GapConfig)
 
 
 def load_app_config(path: Path | None = None) -> AppConfig:
@@ -277,6 +302,7 @@ def _build_app_config(raw: dict) -> AppConfig:
     gen_raw = (raw.get("generation") or {}) if isinstance(raw, dict) else {}
     gen_ollama_raw = (gen_raw.get("ollama") or {}) if isinstance(gen_raw, dict) else {}
     feedback_raw = (raw.get("feedback") or {}) if isinstance(raw, dict) else {}
+    gap_raw = (raw.get("gap") or {}) if isinstance(raw, dict) else {}
 
     pd = ParentDocConfig(
         enabled=bool(pd_raw.get("enabled", ParentDocConfig.enabled)),
@@ -348,6 +374,14 @@ def _build_app_config(raw: dict) -> AppConfig:
         enabled=bool(feedback_raw.get("enabled", feedback_default.enabled)),
         db_path=str(feedback_raw.get("db_path", feedback_default.db_path)),
     )
+    gap_default = GapConfig()
+    gap = GapConfig(
+        enabled=bool(gap_raw.get("enabled", gap_default.enabled)),
+        db_path=str(gap_raw.get("db_path", gap_default.db_path)),
+        low_score_threshold=float(
+            gap_raw.get("low_score_threshold", gap_default.low_score_threshold)
+        ),
+    )
     return AppConfig(
         retrieval=RetrievalConfig(parent_doc=pd, time_decay=td),
         rag=rag,
@@ -356,6 +390,7 @@ def _build_app_config(raw: dict) -> AppConfig:
         embedder=embedder,
         generation=generation,
         feedback=feedback,
+        gap=gap,
     )
 
 
