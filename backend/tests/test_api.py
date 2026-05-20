@@ -165,3 +165,50 @@ def test_get_neighbors_unknown_doc_returns_404() -> None:
     with TestClient(app) as client:
         resp = client.get("/api/graph/does_not_exist_doc/neighbors")
         assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# spec_046: /api/ingest — browser-extension capture
+# ---------------------------------------------------------------------------
+
+
+def test_post_ingest_returns_saved_path(tmp_path) -> None:
+    # Route the writer at a tmp dir so the suite never touches the real
+    # ``examples/knowledge/`` corpus.
+    from backend.src import api as api_module
+
+    with TestClient(app) as client:
+        api_module._state["knowledge_dir"] = str(tmp_path)
+        resp = client.post(
+            "/api/ingest",
+            json={
+                "url": "https://example.com/article",
+                "title": "Sample Article",
+                "body": "hello world",
+                "selected_text": None,
+            },
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["doc_id"].startswith("web_")
+        saved = tmp_path / f"{body['doc_id']}.md"
+        assert saved.exists()
+        text = saved.read_text(encoding="utf-8")
+        assert "Sample Article" in text
+        assert "https://example.com/article" in text
+
+
+def test_post_ingest_invalid_body_422() -> None:
+    with TestClient(app) as client:
+        # Missing required ``url`` field → FastAPI validation error.
+        resp = client.post(
+            "/api/ingest",
+            json={"title": "x", "body": "y"},
+        )
+        assert resp.status_code == 422
+        # Empty title (min_length=1) also rejected.
+        resp2 = client.post(
+            "/api/ingest",
+            json={"url": "https://example.com", "title": "", "body": "y"},
+        )
+        assert resp2.status_code == 422

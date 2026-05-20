@@ -151,3 +151,20 @@ class NeighborResponse(BaseModel):
     center: GraphNodeModel
     neighbors: list[GraphNodeModel]
     hop: int
+
+
+# ---------------------------------------------------------------------------
+# spec_046: browser-extension ingest
+# ---------------------------------------------------------------------------
+
+
+class IngestRequest(BaseModel):
+    url: str = Field(..., min_length=1, max_length=2048)
+    title: str = Field(..., min_length=1, max_length=500)
+    body: str = Field(default="", max_length=200_000)
+    selected_text: str | None = Field(default=None, max_length=200_000)
+
+
+class IngestResponse(BaseModel):
+    saved_path: str
+    doc_id: str
