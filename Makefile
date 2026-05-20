@@ -1,4 +1,4 @@
-.PHONY: eval eval-update-baseline eval-abtest lint test feedback-report
+.PHONY: eval eval-update-baseline eval-abtest lint test feedback-report gap-report
 
 eval:
 	python -m evaluation.run_ragas \
@@ -28,3 +28,7 @@ test:
 # spec_047: render last-7d feedback activity as evaluation/feedback_reports/YYYY-WW.md
 feedback-report:
 	python -c "from backend.src.feedback import SqliteFeedbackStore; from evaluation.feedback_report import save_report_to_file; s = SqliteFeedbackStore(); print(save_report_to_file(s, days=7))"
+
+# spec_048: render last-7d knowledge-gap events as evaluation/gap_reports/YYYY-WW.md
+gap-report:
+	python -c "from backend.src.gap_detection import SqliteGapStore; from evaluation.gap_report import save_report_to_file; s = SqliteGapStore(); print(save_report_to_file(s, days=7))"
