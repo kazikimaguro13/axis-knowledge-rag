@@ -117,6 +117,31 @@ docker run --rm \
 
 ---
 
+## Security — `/api/ingest` token (spec_051)
+
+`POST /api/ingest` (browser-extension の入口) は **デフォルトで無認証**です。
+ローカル (`127.0.0.1`) で立てている限りはこれで十分ですが、LAN 越し /
+外部公開する場合は必ず `AXIS_INGEST_TOKEN` を設定してください。設定が
+ある場合のみ、リクエストごとに `X-Axis-Token` ヘッダで送られた値が
+照合され、不一致は 401 になります。
+
+```bash
+# 推奨: localhost にだけ bind して uvicorn を立てる
+export AXIS_INGEST_TOKEN="$(openssl rand -hex 32)"
+uvicorn backend.src.api:app --host 127.0.0.1 --port 8000
+
+# Browser Extension の Settings に同じ token を貼り、X-Axis-Token で送る
+```
+
+`AXIS_INGEST_TOKEN` を未設定にすると v0.8 互換の挙動 (無認証許容) に
+なります — 互換性のために残しています。外部公開時は **必ず** 設定する
+こと。CORS は `chrome-extension://*` と `localhost`/`127.0.0.1`
+にしか許可していないため、デフォルトでは Web フロントから直接叩く
+攻撃面はありませんが、サーバを `--host 0.0.0.0` で公開する場合は
+リバースプロキシ / トークン両方を組み合わせるのが安全です。
+
+---
+
 ## VPS / Cloud (リファレンス)
 
 > **注意**: 以下は参考手順。v0.3 では実機検証していない。本番運用は v0.4 で対応予定。
