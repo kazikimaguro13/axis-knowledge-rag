@@ -42,7 +42,9 @@ from mcp_server.formatters import (
     format_chat_md,
     format_integrity_md,
     format_neighbors_json,
+    format_neighbors_json_bidirectional,
     format_neighbors_md,
+    format_neighbors_md_bidirectional,
     format_search_results_json,
     format_search_results_md,
 )
@@ -516,6 +518,11 @@ async def axis_neighbors(params: NeighborsInput) -> str:
     - ``in``:  docs *referencing* the input (incoming refs)
     - ``both`` (default): union of the two
 
+    spec_049: pass ``bidirectional=true`` to get an Obsidian-style payload
+    with forwardlinks (out) and backlinks (in) split into separate sections.
+    Legacy callers (``bidirectional=false``, the default) see the unchanged
+    single-direction shape, so this is fully backward-compatible.
+
     Args:
         params: see :class:`NeighborsInput`.
 
@@ -529,6 +536,28 @@ async def axis_neighbors(params: NeighborsInput) -> str:
             return make_error_response(
                 "axis_neighbors", ValueError(f"doc_id {params.doc_id} not in graph")
             )
+        if params.bidirectional:
+            fwd_ids = g.neighbors_within_hop(
+                params.doc_id,
+                hop=params.hop,
+                max_neighbors=params.max_neighbors,
+                direction="out",
+            )
+            back_ids = g.neighbors_within_hop(
+                params.doc_id,
+                hop=params.hop,
+                max_neighbors=params.max_neighbors,
+                direction="in",
+            )
+            forwardlinks = [n for n in (g.get_node(i) for i in fwd_ids) if n is not None]
+            backlinks = [n for n in (g.get_node(i) for i in back_ids) if n is not None]
+            if params.response_format == ResponseFormat.JSON:
+                return format_neighbors_json_bidirectional(
+                    center, forwardlinks, backlinks, params.hop
+                )
+            return format_neighbors_md_bidirectional(
+                center, forwardlinks, backlinks, params.hop
+            )
         neighbour_ids = g.neighbors_within_hop(
             params.doc_id,
             hop=params.hop,
@@ -539,7 +568,7 @@ async def axis_neighbors(params: NeighborsInput) -> str:
         neighbours = [n for n in neighbours if n is not None]
         if params.response_format == ResponseFormat.JSON:
             return format_neighbors_json(center, neighbours, params.hop)
-        return format_neighbors_md(center, neighbours, params.hop)
+        return format_neighbors_md(center, neighbours, params.hop, params.direction)
     except Exception as e:
         return make_error_response("axis_neighbors", e)
 

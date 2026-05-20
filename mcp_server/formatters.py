@@ -156,8 +156,21 @@ def format_axes_md(axes: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def format_neighbors_md(center: Any, neighbors: list[Any], hop: int) -> str:
-    """Format a graph-neighbours payload as markdown."""
+_DIRECTION_HEADER = {
+    "out": "→ 参照している",
+    "in": "← 参照されている",
+    "both": "🔗 隣接",
+}
+
+
+def format_neighbors_md(
+    center: Any, neighbors: list[Any], hop: int, direction: str = "both"
+) -> str:
+    """Format a graph-neighbours payload as markdown.
+
+    ``direction`` (spec_049) selects the section header so a single-direction
+    query reads as forward / back-links rather than a generic "neighbours" list.
+    """
     lines = [f"# Neighbours of `{center.doc_id}` (hop={hop})", ""]
     lines.append(f"**center**: {center.title or '(no title)'}")
     if center.axes:
@@ -166,10 +179,11 @@ def format_neighbors_md(center: Any, neighbors: list[Any], hop: int) -> str:
         f"- in_degree: {center.in_degree}, out_degree: {center.out_degree}"
     )
     lines.append("")
+    header = _DIRECTION_HEADER.get(direction, _DIRECTION_HEADER["both"])
     if not neighbors:
         lines.append("_No neighbours within the requested hop._")
         return "\n".join(lines)
-    lines.append(f"## Neighbours ({len(neighbors)})")
+    lines.append(f"## {header} ({len(neighbors)})")
     for n in neighbors:
         lines.append(
             f"- `{n.doc_id}` — {n.title or '(no title)'} "
@@ -199,6 +213,66 @@ def format_neighbors_json(center: Any, neighbors: list[Any], hop: int) -> str:
             }
             for n in neighbors
         ],
+    }
+    return json.dumps(payload, ensure_ascii=False, indent=2)
+
+
+def format_neighbors_md_bidirectional(
+    center: Any,
+    forwardlinks: list[Any],
+    backlinks: list[Any],
+    hop: int,
+) -> str:
+    """spec_049: Obsidian-style bidirectional view in one markdown block."""
+    lines = [f"# Neighbours of `{center.doc_id}` (hop={hop})", ""]
+    lines.append(f"**center**: {center.title or '(no title)'}")
+    if center.axes:
+        lines.append(f"- axes: {center.axes}")
+    lines.append(
+        f"- in_degree: {center.in_degree}, out_degree: {center.out_degree}"
+    )
+    lines.append("")
+    if forwardlinks:
+        lines.append(f"## → 参照している ({len(forwardlinks)})")
+        for n in forwardlinks:
+            lines.append(
+                f"- `{n.doc_id}` — {n.title or '(no title)'} "
+                f"(in={n.in_degree}, out={n.out_degree})"
+            )
+        lines.append("")
+    if backlinks:
+        lines.append(f"## ← 参照されている ({len(backlinks)})")
+        for n in backlinks:
+            lines.append(
+                f"- `{n.doc_id}` — {n.title or '(no title)'} "
+                f"(in={n.in_degree}, out={n.out_degree})"
+            )
+        lines.append("")
+    if not forwardlinks and not backlinks:
+        lines.append("_このドキュメントは独立ノードです (リンク無し)。_")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def format_neighbors_json_bidirectional(
+    center: Any,
+    forwardlinks: list[Any],
+    backlinks: list[Any],
+    hop: int,
+) -> str:
+    def _node(n: Any) -> dict:
+        return {
+            "id": n.doc_id,
+            "title": n.title,
+            "axes": n.axes,
+            "in_degree": n.in_degree,
+            "out_degree": n.out_degree,
+        }
+
+    payload = {
+        "center": _node(center),
+        "hop": hop,
+        "forwardlinks": [_node(n) for n in forwardlinks],
+        "backlinks": [_node(n) for n in backlinks],
     }
     return json.dumps(payload, ensure_ascii=False, indent=2)
 
