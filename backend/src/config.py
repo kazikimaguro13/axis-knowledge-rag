@@ -198,6 +198,24 @@ class GraphConfig:
     knowledge_dir: str = "./examples/knowledge"
 
 
+# ---------------------------------------------------------------------------
+# spec_047: active-learning feedback loop settings
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class FeedbackConfig:
+    """Settings for the 👍/👎 feedback store (spec_047).
+
+    Defaults: enabled, file-backed SQLite at ``~/.axis_feedback.db``. Flip
+    ``enabled`` to False to have ``/api/feedback`` return 503 — useful for
+    deployments that route signals through a different observability path.
+    """
+
+    enabled: bool = True
+    db_path: str = "~/.axis_feedback.db"
+
+
 @dataclass(frozen=True)
 class AppConfig:
     """Aggregated runtime config (axes + retrieval + rag + chat + graph)."""
@@ -210,6 +228,8 @@ class AppConfig:
     # v0.8.1 behaviour — Gemini for embedding, Claude for generation).
     embedder: EmbedderConfig = field(default_factory=EmbedderConfig)
     generation: GenerationConfig = field(default_factory=GenerationConfig)
+    # spec_047: 👍/👎 feedback store.
+    feedback: FeedbackConfig = field(default_factory=FeedbackConfig)
 
 
 def load_app_config(path: Path | None = None) -> AppConfig:
@@ -256,6 +276,7 @@ def _build_app_config(raw: dict) -> AppConfig:
     emb_ollama_raw = (emb_raw.get("ollama") or {}) if isinstance(emb_raw, dict) else {}
     gen_raw = (raw.get("generation") or {}) if isinstance(raw, dict) else {}
     gen_ollama_raw = (gen_raw.get("ollama") or {}) if isinstance(gen_raw, dict) else {}
+    feedback_raw = (raw.get("feedback") or {}) if isinstance(raw, dict) else {}
 
     pd = ParentDocConfig(
         enabled=bool(pd_raw.get("enabled", ParentDocConfig.enabled)),
@@ -322,6 +343,11 @@ def _build_app_config(raw: dict) -> AppConfig:
             url=str(gen_ollama_raw.get("url", gen_default.ollama.url)),
         ),
     )
+    feedback_default = FeedbackConfig()
+    feedback = FeedbackConfig(
+        enabled=bool(feedback_raw.get("enabled", feedback_default.enabled)),
+        db_path=str(feedback_raw.get("db_path", feedback_default.db_path)),
+    )
     return AppConfig(
         retrieval=RetrievalConfig(parent_doc=pd, time_decay=td),
         rag=rag,
@@ -329,6 +355,7 @@ def _build_app_config(raw: dict) -> AppConfig:
         graph=graph,
         embedder=embedder,
         generation=generation,
+        feedback=feedback,
     )
 
 

@@ -110,3 +110,12 @@ generation:
   ollama:
     model: "llama3"                  # try "llama3:70b" / "qwen2.5" / etc.
     url: "http://localhost:11434"
+
+# spec_047: Active-learning feedback loop (👍 / 👎 button → SQLite).
+# Records (query, doc_id, rating, session_id, note, timestamp) so we can
+# build weekly reports of unpopular docs / under-served queries. Auto
+# weight-tuning is parked for v0.10; this section is the ground-truth
+# capture layer. Flip `enabled: false` to make /api/feedback return 503.
+feedback:
+  enabled: true
+  db_path: "~/.axis_feedback.db"
