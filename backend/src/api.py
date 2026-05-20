@@ -38,6 +38,8 @@ from backend.src.schemas import (
     GraphResponse,
     GraphStats,
     HealthResponse,
+    IngestRequest,
+    IngestResponse,
     NeighborResponse,
     SearchRequest,
     SearchResponse,
@@ -113,6 +115,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     _state["chat_cfg"] = app_cfg.chat
     _state["graph"] = graph
     _state["graph_cfg"] = app_cfg.graph
+    _state["knowledge_dir"] = app_cfg.graph.knowledge_dir
     try:
         yield
     finally:
@@ -157,14 +160,17 @@ app = FastAPI(
     openapi_url="/api/openapi.json",
 )
 
+# spec_046: allow the Chrome MV3 extension (chrome-extension://<id>) plus any
+# localhost port for dev (frontend on :3000, Streamlit on :8501, etc.). Starlette
+# CORSMiddleware does not support wildcards in ``allow_origins`` literally, so
+# we use ``allow_origin_regex``. ``allow_credentials`` must be False whenever
+# the matched origin set is open (browsers reject credentials + wildcard-like
+# matches anyway).
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://localhost:8501",
-    ],
-    allow_credentials=True,
-    allow_methods=["*"],
+    allow_origin_regex=r"^(chrome-extension://.*|http://localhost(:\d+)?|http://127\.0\.0\.1(:\d+)?)$",
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 
@@ -195,6 +201,39 @@ async def health() -> HealthResponse:
 async def get_axes() -> AxesResponse:
     cfg = _state.get("axes_cfg", {"axes": []})
     return AxesResponse(axes=[AxisDef(**a) for a in cfg.get("axes", [])])
+
+
+# ---------------------------------------------------------------------------
+# spec_046: /api/ingest — browser-extension capture
+# ---------------------------------------------------------------------------
+
+
+@app.post("/api/ingest", response_model=IngestResponse)
+async def post_ingest(req: IngestRequest) -> IngestResponse:
+    """Persist a captured web page as YAML+Markdown under ``knowledge_dir``.
+
+    The browser extension posts URL + title + body (+ optional user
+    selection); we write a fresh ``web_<timestamp>_<slug>.md`` file. The
+    operation is intentionally non-idempotent — every call yields a new
+    timestamped file, which is also how name collisions are avoided.
+    """
+
+    # Lazy import keeps the ingest_web module out of the cold-start path for
+    # deployments that never use the browser extension.
+    from backend.src.ingest_web import save_web_page
+
+    knowledge_dir = _state.get("knowledge_dir", "./examples/knowledge")
+    try:
+        path = save_web_page(
+            url=req.url,
+            title=req.title,
+            body=req.body,
+            selected_text=req.selected_text,
+            knowledge_dir=knowledge_dir,
+        )
+    except OSError as e:
+        raise HTTPException(status_code=500, detail=f"failed to write file: {e}") from e
+    return IngestResponse(saved_path=str(path), doc_id=path.stem)
 
 
 @app.post("/api/search", response_model=SearchResponse)
