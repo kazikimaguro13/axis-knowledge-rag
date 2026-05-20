@@ -22,6 +22,7 @@ from backend.src.conversation import (
 )
 from backend.src.embedder import make_embedder
 from backend.src.feedback import FeedbackStore, make_feedback_store
+from backend.src.gap_detection import GapStore, make_gap_store
 from backend.src.graph import KnowledgeGraph, build_default_graph
 from backend.src.normalizer import Normalizer
 from backend.src.rag import RAGPipeline, make_generation_backend
@@ -37,6 +38,7 @@ from backend.src.schemas import (
     FeedbackReportResponse,
     FeedbackRequest,
     FeedbackResponse,
+    GapReportResponse,
     GraphEdgeModel,
     GraphNodeModel,
     GraphResponse,
@@ -91,6 +93,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         except Exception as e:  # noqa: BLE001
             logger.warning("failed to build knowledge graph: %s — disabling /api/graph", e)
             graph = None
+    # spec_048: build the gap store first so both the search engine
+    # (no_results / low_score) and the RAG pipeline (llm_no_info) can
+    # share the same backing SQLite. Disabled config → both hooks become
+    # no-ops without any further conditionals at the call sites.
+    gap_store = make_gap_store(app_cfg.gap)
+    if gap_store is not None:
+        logger.info("gap store: %s", type(gap_store).__name__)
+    else:
+        logger.info("gap store: disabled (gap.enabled=false)")
     engine = SearchEngine(
         store,
         embedder,
@@ -98,11 +109,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         parent_doc_enabled=parent_doc_enabled,
         top_k_children=pd.top_k_children,
         graph=graph,
+        gap_store=gap_store,
+        gap_low_score_threshold=app_cfg.gap.low_score_threshold,
     )
     rag = RAGPipeline(
         engine,
         context_max_chars=app_cfg.rag.context_max_chars,
         backend=make_generation_backend(app_cfg.generation),
+        gap_store=gap_store,
     )
     chat_store = make_conversation_store(app_cfg.chat)
     configure_default_store(chat_store)
@@ -127,6 +141,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     _state["knowledge_dir"] = app_cfg.graph.knowledge_dir
     _state["feedback_store"] = feedback_store
     _state["feedback_cfg"] = app_cfg.feedback
+    _state["gap_store"] = gap_store
+    _state["gap_cfg"] = app_cfg.gap
     try:
         yield
     finally:
@@ -139,6 +155,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 feedback_store.close()
             except Exception:  # noqa: BLE001
                 logger.warning("feedback store close failed", exc_info=True)
+        if gap_store is not None:
+            try:
+                gap_store.close()
+            except Exception:  # noqa: BLE001
+                logger.warning("gap store close failed", exc_info=True)
         _state.clear()
 
 
@@ -454,6 +475,31 @@ async def get_feedback_report(
 
     store = _require_feedback_store()
     return FeedbackReportResponse(markdown=generate_report(store, days=days))
+
+
+# ---------------------------------------------------------------------------
+# spec_048: /api/gap/report — knowledge-gap weekly summary
+# ---------------------------------------------------------------------------
+
+
+def _require_gap_store() -> GapStore:
+    store = _state.get("gap_store")
+    if store is None:
+        raise HTTPException(
+            status_code=503,
+            detail="gap detection is disabled (config.yml gap.enabled=false)",
+        )
+    return store
+
+
+@app.get("/api/gap/report", response_model=GapReportResponse)
+async def get_gap_report(
+    days: int = Query(7, ge=1, le=365),
+) -> GapReportResponse:
+    from evaluation.gap_report import generate_report
+
+    store = _require_gap_store()
+    return GapReportResponse(markdown=generate_report(store, days=days))
 
 
 @app.get("/api/graph/{doc_id}/neighbors", response_model=NeighborResponse)

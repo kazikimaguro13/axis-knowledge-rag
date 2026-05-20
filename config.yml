@@ -119,3 +119,15 @@ generation:
 feedback:
   enabled: true
   db_path: "~/.axis_feedback.db"
+
+# spec_048: Knowledge-gap detection (search misses + "LLM doesn't know" signals).
+# Records (query, reason, top_score, n_results, timestamp) into a local SQLite
+# whenever search returns no hits, the top hit falls below `low_score_threshold`,
+# or the LLM answers "提供された資料には記載がありません" (regex detection).
+# Surfaced as a weekly markdown report via `make gap-report` and
+# GET /api/gap/report?days=7 — answers "what topics should we ingest next?"
+# Flip `enabled: false` to make every hook a no-op (zero hot-path overhead).
+gap:
+  enabled: true
+  db_path: "~/.axis_gap.db"
+  low_score_threshold: 0.35

@@ -23,6 +23,7 @@ from backend.src.conversation import (
     get_default_store,
 )
 from backend.src.embedder import make_embedder
+from backend.src.gap_detection import GapStore, detect_no_info
 from backend.src.question_rewriter import rewrite_question
 from backend.src.search import SearchEngine, SearchResult
 from backend.src.vector_store import VectorStore
@@ -354,9 +355,14 @@ class RAGPipeline:
         model: str = DEFAULT_MODEL,
         context_max_chars: int | None = None,
         backend: GenerationBackend | None = None,
+        gap_store: GapStore | None = None,
     ) -> None:
         self._engine = engine
         self._model = model
+        # spec_048: optional gap-detection hook. When ``None`` every
+        # ``answer`` / ``chat`` call skips the regex check + record (zero
+        # cost), matching ``gap.enabled=false`` semantics.
+        self._gap_store = gap_store
         if context_max_chars is None:
             try:
                 context_max_chars = load_app_config().rag.context_max_chars
@@ -437,7 +443,9 @@ class RAGPipeline:
     ) -> Answer:
         results = self._engine.search(question, filters=filters, top_k=top_k)
         if self._use_dummy:
-            return _dummy_answer(question, results)
+            ans = _dummy_answer(question, results)
+            self._record_llm_gap(question, ans.text, results)
+            return ans
 
         # Prefer build_context() — uses full parent text in parent-doc mode,
         # falls back to snippets in legacy mode. Same prompt either way.
@@ -457,6 +465,7 @@ class RAGPipeline:
         )
         text, used = parse_and_validate_citations(raw, n_sources=len(results))
         cited_ids = [results[i].id for i in sorted(used)]
+        self._record_llm_gap(question, text, results)
         return Answer(
             text=text,
             sources=results,
@@ -464,6 +473,39 @@ class RAGPipeline:
             is_dummy=False,
             model=self._backend.model_name,
         )
+
+    # ------------------------------------------------------------------
+    # spec_048: knowledge-gap detection hook
+    # ------------------------------------------------------------------
+
+    def _record_llm_gap(
+        self,
+        question: str,
+        answer_text: str,
+        results: list[SearchResult],
+    ) -> None:
+        """Log when the LLM answered "資料に記載がない" (regex detection).
+
+        Skipped when ``gap_store`` wasn't wired in (the default outside
+        ``api.py``). Search-side gaps are logged separately by
+        ``SearchEngine._record_gap``; this hook only fires for the
+        ``llm_no_info`` reason so the report can distinguish "we didn't
+        find anything" from "we found something but the LLM still
+        couldn't answer".
+        """
+        if self._gap_store is None or not question:
+            return
+        try:
+            if not detect_no_info(answer_text):
+                return
+            self._gap_store.record(
+                query=question,
+                reason="llm_no_info",
+                top_score=float(results[0].score) if results else None,
+                n_results=len(results),
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.warning("gap store record failed: %s", e)
 
     # ------------------------------------------------------------------
     # spec_032: conversational RAG
@@ -522,6 +564,10 @@ class RAGPipeline:
                 history=history,
                 max_tokens=max_tokens,
             )
+        # spec_048: chat path goes through the same gap detection — the
+        # rewritten question is what hit the index, but we want the
+        # user-facing string in the report so it's actionable.
+        self._record_llm_gap(question, ans.text, results)
 
         # Persist turn — sources as plain dicts so the store stays
         # JSON-friendly (the API returns them via asdict()).
