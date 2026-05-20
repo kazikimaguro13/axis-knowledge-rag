@@ -21,6 +21,7 @@ from backend.src.conversation import (
     make_conversation_store,
 )
 from backend.src.embedder import make_embedder
+from backend.src.feedback import FeedbackStore, make_feedback_store
 from backend.src.graph import KnowledgeGraph, build_default_graph
 from backend.src.normalizer import Normalizer
 from backend.src.rag import RAGPipeline, make_generation_backend
@@ -33,6 +34,9 @@ from backend.src.schemas import (
     ChatMessagePayload,
     ChatRequest,
     ChatResponseModel,
+    FeedbackReportResponse,
+    FeedbackRequest,
+    FeedbackResponse,
     GraphEdgeModel,
     GraphNodeModel,
     GraphResponse,
@@ -107,6 +111,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         type(chat_store).__name__,
         app_cfg.chat.storage.backend,
     )
+    feedback_store = make_feedback_store(app_cfg.feedback)
+    if feedback_store is not None:
+        logger.info("feedback store: %s", type(feedback_store).__name__)
+    else:
+        logger.info("feedback store: disabled (feedback.enabled=false)")
     _state["engine"] = engine
     _state["rag"] = rag
     _state["embedder"] = embedder
@@ -116,6 +125,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     _state["graph"] = graph
     _state["graph_cfg"] = app_cfg.graph
     _state["knowledge_dir"] = app_cfg.graph.knowledge_dir
+    _state["feedback_store"] = feedback_store
+    _state["feedback_cfg"] = app_cfg.feedback
     try:
         yield
     finally:
@@ -123,6 +134,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             chat_store.close()
         except Exception:  # noqa: BLE001
             logger.warning("chat store close failed", exc_info=True)
+        if feedback_store is not None:
+            try:
+                feedback_store.close()
+            except Exception:  # noqa: BLE001
+                logger.warning("feedback store close failed", exc_info=True)
         _state.clear()
 
 
@@ -399,6 +415,45 @@ async def get_graph(
         edges=[GraphEdgeModel(source=e.source, target=e.target) for e in edges],
         stats=GraphStats(**stats_dict),
     )
+
+
+# ---------------------------------------------------------------------------
+# spec_047: /api/feedback — 👍 / 👎 capture + weekly report
+# ---------------------------------------------------------------------------
+
+
+def _require_feedback_store() -> FeedbackStore:
+    store = _state.get("feedback_store")
+    if store is None:
+        raise HTTPException(
+            status_code=503,
+            detail="feedback is disabled (config.yml feedback.enabled=false)",
+        )
+    return store
+
+
+@app.post("/api/feedback", response_model=FeedbackResponse)
+async def post_feedback(req: FeedbackRequest) -> FeedbackResponse:
+    store = _require_feedback_store()
+    fid = store.record(
+        query=req.query,
+        doc_id=req.doc_id,
+        rating=req.rating,
+        session_id=req.session_id,
+        note=req.note,
+    )
+    return FeedbackResponse(feedback_id=fid)
+
+
+@app.get("/api/feedback/report", response_model=FeedbackReportResponse)
+async def get_feedback_report(
+    days: int = Query(7, ge=1, le=365),
+) -> FeedbackReportResponse:
+    # Import locally so the evaluation package stays out of the cold-start path.
+    from evaluation.feedback_report import generate_report
+
+    store = _require_feedback_store()
+    return FeedbackReportResponse(markdown=generate_report(store, days=days))
 
 
 @app.get("/api/graph/{doc_id}/neighbors", response_model=NeighborResponse)

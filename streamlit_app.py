@@ -167,18 +167,31 @@ def _src_attr(s: Any, key: str, default: Any = "") -> Any:
     return getattr(s, key, default)
 
 
-def _render_sources_with_anchors(sources: list[Any], cited_ids: list[str]) -> None:
-    """Render the source cards with `id=axis-src-N` so `[N]` anchors can flash them."""
+def _render_sources_with_anchors(
+    sources: list[Any],
+    cited_ids: list[str],
+    *,
+    feedback_query: str | None = None,
+    feedback_session_id: str | None = None,
+    feedback_key_prefix: str = "src",
+) -> None:
+    """Render the source cards with `id=axis-src-N` so `[N]` anchors can flash them.
+
+    spec_047: each card gets a 👍 / 👎 pair that POSTs to ``/api/feedback``.
+    The ``feedback_key_prefix`` keeps Streamlit button keys unique across
+    tabs (search vs. chat) and across messages within the chat tab.
+    """
     for i, r in enumerate(sources, 1):
         title = html.escape(str(_src_attr(r, "title")))
-        rid = html.escape(str(_src_attr(r, "id")))
+        rid_raw = str(_src_attr(r, "id"))
+        rid = html.escape(rid_raw)
         snippet = html.escape(str(_src_attr(r, "body_snippet")))
         axes = _src_attr(r, "axes", {}) or {}
         axes_str = html.escape(", ".join(f"{k}: {v}" for k, v in axes.items()))
         score = float(_src_attr(r, "score", 0.0) or 0.0)
         cited_badge = (
             ' <span style="color:#047857;font-size:11px;">★ cited</span>'
-            if rid in cited_ids
+            if rid_raw in cited_ids
             else ""
         )
         st.markdown(
@@ -196,6 +209,44 @@ def _render_sources_with_anchors(sources: list[Any], cited_ids: list[str]) -> No
             """,
             unsafe_allow_html=True,
         )
+        cols = st.columns([1, 1, 8])
+        with cols[0]:
+            if st.button(
+                "👍", key=f"fb_up_{feedback_key_prefix}_{i}_{rid_raw}"
+            ):
+                _send_feedback(feedback_query, rid_raw, 1, feedback_session_id)
+        with cols[1]:
+            if st.button(
+                "👎", key=f"fb_down_{feedback_key_prefix}_{i}_{rid_raw}"
+            ):
+                _send_feedback(feedback_query, rid_raw, -1, feedback_session_id)
+
+
+def _send_feedback(
+    query: str | None,
+    doc_id: str | None,
+    rating: int,
+    session_id: str | None,
+) -> None:
+    """POST a feedback record. Best-effort: failures surface as a toast only."""
+    try:
+        r = requests.post(
+            f"{API_BASE}/api/feedback",
+            json={
+                "query": query,
+                "doc_id": doc_id,
+                "rating": rating,
+                "session_id": session_id,
+            },
+            timeout=10,
+        )
+        if r.status_code == 503:
+            st.toast("feedback is disabled in config.yml", icon="ℹ️")
+            return
+        r.raise_for_status()
+        st.toast("Thanks!" if rating > 0 else "Noted.", icon="✅")
+    except Exception as e:  # noqa: BLE001
+        st.toast(f"feedback 失敗: {e}", icon="⚠️")
 
 
 # ----- Tabs ---------------------------------------------------------------
@@ -213,7 +264,12 @@ def _search_tab() -> None:
         _render_answer_with_citations(ans.text, ans.sources)
 
         st.subheader(f"📚 関連資料 ({len(ans.sources)} 件)")
-        _render_sources_with_anchors(ans.sources, ans.cited_ids)
+        _render_sources_with_anchors(
+            ans.sources,
+            ans.cited_ids,
+            feedback_query=question,
+            feedback_key_prefix="search",
+        )
     else:
         st.info("左サイドバーで軸を絞り込み、上の入力欄に質問を入れてください。")
         st.markdown(
@@ -255,7 +311,13 @@ def _chat_tab() -> None:
                 # render an expander with the same `axis-src-N` ids below.
                 _render_answer_with_citations(m["content"], m["sources"])
                 with st.expander(f"📚 出典 {len(m['sources'])} 件"):
-                    _render_sources_with_anchors(m["sources"], [])
+                    _render_sources_with_anchors(
+                        m["sources"],
+                        [],
+                        feedback_query=m.get("user_question"),
+                        feedback_session_id=st.session_state.chat_session_id,
+                        feedback_key_prefix=f"chat_hist_{m.get('turn_idx', 0)}",
+                    )
             else:
                 st.markdown(m["content"])
 
@@ -285,18 +347,35 @@ def _chat_tab() -> None:
             if data.get("rewritten_question"):
                 st.caption(f"🔁 rewritten: `{data['rewritten_question']}`")
             sources = data.get("sources", [])
+            turn_idx = len(st.session_state.chat_messages)
             if sources:
                 _render_answer_with_citations(data["answer"], sources)
                 with st.expander(f"📚 出典 {len(sources)} 件", expanded=False):
-                    _render_sources_with_anchors(sources, data.get("cited_ids", []))
+                    _render_sources_with_anchors(
+                        sources,
+                        data.get("cited_ids", []),
+                        feedback_query=q,
+                        feedback_session_id=st.session_state.chat_session_id,
+                        feedback_key_prefix=f"chat_live_{turn_idx}",
+                    )
             else:
                 st.markdown(data["answer"])
+            # spec_047: 👍 / 👎 on the whole answer (independent of source cards).
+            fb_cols = st.columns([1, 1, 8])
+            with fb_cols[0]:
+                if st.button("👍", key=f"fb_ans_up_{turn_idx}"):
+                    _send_feedback(q, None, 1, st.session_state.chat_session_id)
+            with fb_cols[1]:
+                if st.button("👎", key=f"fb_ans_down_{turn_idx}"):
+                    _send_feedback(q, None, -1, st.session_state.chat_session_id)
             st.session_state.chat_messages.append(
                 {
                     "role": "assistant",
                     "content": data["answer"],
                     "sources": data.get("sources", []),
                     "rewritten_question": data.get("rewritten_question"),
+                    "user_question": q,
+                    "turn_idx": turn_idx,
                 }
             )
 

@@ -212,3 +212,85 @@ def test_post_ingest_invalid_body_422() -> None:
             json={"url": "https://example.com", "title": "", "body": "y"},
         )
         assert resp2.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# spec_047: /api/feedback + /api/feedback/report
+# ---------------------------------------------------------------------------
+
+
+def test_post_feedback_records(tmp_path) -> None:
+    from backend.src import api as api_module
+    from backend.src.feedback import SqliteFeedbackStore
+
+    with TestClient(app) as client:
+        # Swap in a tmp-dir store so the test never touches ~/.axis_feedback.db.
+        tmp_store = SqliteFeedbackStore(db_path=str(tmp_path / "fb.db"))
+        api_module._state["feedback_store"] = tmp_store
+        try:
+            resp = client.post(
+                "/api/feedback",
+                json={
+                    "query": "RAG とは?",
+                    "doc_id": "doc_001",
+                    "rating": 1,
+                    "session_id": "sid_abc",
+                },
+            )
+            assert resp.status_code == 200, resp.text
+            assert "feedback_id" in resp.json()
+            assert tmp_store.count() == 1
+        finally:
+            tmp_store.close()
+
+
+def test_post_feedback_rating_validated() -> None:
+    with TestClient(app) as client:
+        # rating must be in [-1, 1]; 2 is rejected by Pydantic Field(ge=-1, le=1).
+        resp = client.post(
+            "/api/feedback",
+            json={"query": "q", "doc_id": "d", "rating": 2},
+        )
+        assert resp.status_code == 422
+
+
+def test_feedback_report_endpoint(tmp_path) -> None:
+    from backend.src import api as api_module
+    from backend.src.feedback import SqliteFeedbackStore
+
+    with TestClient(app) as client:
+        tmp_store = SqliteFeedbackStore(db_path=str(tmp_path / "fb.db"))
+        api_module._state["feedback_store"] = tmp_store
+        try:
+            client.post(
+                "/api/feedback",
+                json={"query": "q1", "doc_id": "doc_x", "rating": -1},
+            )
+            resp = client.get("/api/feedback/report?days=7")
+            assert resp.status_code == 200
+            md = resp.json()["markdown"]
+            assert "Feedback report" in md
+            assert "doc_x" in md
+        finally:
+            tmp_store.close()
+
+
+def test_feedback_disabled_returns_503() -> None:
+    from backend.src import api as api_module
+
+    with TestClient(app) as client:
+        # Lifespan populated the store; null it out to simulate
+        # config.feedback.enabled=false (which `make_feedback_store` maps to
+        # `None`).
+        prev = api_module._state.get("feedback_store")
+        api_module._state["feedback_store"] = None
+        try:
+            resp = client.post(
+                "/api/feedback",
+                json={"query": "q", "doc_id": "d", "rating": 1},
+            )
+            assert resp.status_code == 503
+            resp2 = client.get("/api/feedback/report")
+            assert resp2.status_code == 503
+        finally:
+            api_module._state["feedback_store"] = prev

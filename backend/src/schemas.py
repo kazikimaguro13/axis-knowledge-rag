@@ -168,3 +168,32 @@ class IngestRequest(BaseModel):
 class IngestResponse(BaseModel):
     saved_path: str
     doc_id: str
+
+
+# ---------------------------------------------------------------------------
+# spec_047: active-learning feedback loop
+# ---------------------------------------------------------------------------
+
+
+class FeedbackRequest(BaseModel):
+    """A single 👍/👎 (or neutral) signal from the UI.
+
+    ``doc_id`` is omitted when the feedback applies to the assistant's
+    whole answer (chat) rather than an individual source card.
+    ``session_id`` is set for chat-tab feedback; the search tab is
+    anonymous so it stays null.
+    """
+
+    query: str | None = Field(default=None, max_length=2000)
+    doc_id: str | None = Field(default=None, max_length=500)
+    rating: int = Field(..., ge=-1, le=1)
+    session_id: str | None = Field(default=None, max_length=200)
+    note: str | None = Field(default=None, max_length=2000)
+
+
+class FeedbackResponse(BaseModel):
+    feedback_id: str
+
+
+class FeedbackReportResponse(BaseModel):
+    markdown: str

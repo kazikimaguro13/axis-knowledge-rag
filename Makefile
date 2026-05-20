@@ -1,4 +1,4 @@
-.PHONY: eval eval-update-baseline eval-abtest lint test
+.PHONY: eval eval-update-baseline eval-abtest lint test feedback-report
 
 eval:
 	python -m evaluation.run_ragas \
@@ -24,3 +24,7 @@ lint:
 
 test:
 	pytest
+
+# spec_047: render last-7d feedback activity as evaluation/feedback_reports/YYYY-WW.md
+feedback-report:
+	python -c "from backend.src.feedback import SqliteFeedbackStore; from evaluation.feedback_report import save_report_to_file; s = SqliteFeedbackStore(); print(save_report_to_file(s, days=7))"

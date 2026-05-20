@@ -93,6 +93,7 @@ export default function HomePage() {
               n={i + 1}
               cited={answer?.cited_ids?.includes(r.id) ?? false}
               highlighted={highlightedId === r.id}
+              query={query || null}
             />
           ))}
         </div>

@@ -41,6 +41,7 @@ export default function ChatPage() {
           content: res.answer,
           sources: res.sources,
           rewrittenQuestion: res.rewritten_question,
+          userQuestion: question,
         },
       ]);
     } catch (e) {
@@ -95,7 +96,7 @@ export default function ChatPage() {
           </p>
         )}
         {messages.map((m, i) => (
-          <ChatMessage key={i} msg={m} />
+          <ChatMessage key={i} msg={m} sessionId={sessionId} />
         ))}
         {loading && (
           <p className="text-sm text-slate-400" aria-live="polite">

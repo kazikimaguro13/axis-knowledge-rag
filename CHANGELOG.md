@@ -2,6 +2,73 @@
 
 ## [Unreleased]
 
+### Day 47 (2026-05-20) — Active-learning feedback loop (spec_047)
+
+v0.9.0 marquee #3: 👍 / 👎 capture on search results + chat answers,
+stored in a local SQLite + summarised by a weekly markdown report. MVP
+scope is intentionally just **logging** — automatic weight tuning over
+the captured signals is parked for v0.10. The signal layer goes in
+first so any future tuning can be evaluated against real ground truth.
+
+- **`backend/src/feedback.py`** (new) — `FeedbackRecord` dataclass +
+  `FeedbackStore` Protocol + `SqliteFeedbackStore` (stdlib `sqlite3`,
+  WAL mode, single shared connection under `threading.Lock`). Default
+  DB path `~/.axis_feedback.db` (next to `~/.axis_chat.db` from
+  spec_036). `make_feedback_store(cfg)` returns `None` when
+  `feedback.enabled=false` so the API can map that to 503 rather than
+  silently swallowing writes
+- **POST /api/feedback / GET /api/feedback/report** (`backend/src/api.py`) —
+  new endpoints with `FeedbackRequest` / `FeedbackResponse` /
+  `FeedbackReportResponse` Pydantic schemas. `rating` is constrained
+  to `[-1, 1]` at the schema layer; `doc_id` / `session_id` / `note`
+  are all nullable so the search tab (anonymous) and chat tab (with
+  session) can use the same endpoint. `_require_feedback_store()` →
+  503 when disabled. Lifespan closes the store on shutdown
+- **`evaluation/feedback_report.py`** (new) — pure-function
+  `generate_report(store, days=7)` + `save_report_to_file(...)` which
+  writes `evaluation/feedback_reports/YYYY-WW.md`. Sections: total
+  counts (👍 / 👎 / neutral), top-10 queries by frequency, top-5
+  unpopular docs (net 👎 over 👍), top-5 popular docs. Docs with
+  pos==neg are dropped from both lists — those are the "ignore me"
+  signal
+- **Makefile** — `feedback-report` target shells into the renderer with
+  the default DB path. `~ $ make feedback-report` →
+  `evaluation/feedback_reports/2026-W21.md`
+- **`config.yml` + `backend/src/config.py`** — new `FeedbackConfig`
+  (`enabled` + `db_path`) wired into `AppConfig`. `_build_app_config()`
+  reads the new `feedback.*` section; defaults preserve the always-on
+  behaviour
+- **Frontend (Next.js)**: `frontend/src/lib/feedbackClient.ts` (new,
+  single `postFeedback(payload)` helper). `ResultCard.tsx` gets a
+  `👍 役立った` / `👎 ふつう` pair under the snippet, plus `query` /
+  `sessionId` props from the caller. `ChatMessage.tsx` gets a
+  whole-answer 👍 / 👎 pair under the rendered body, plus a per-source
+  pair under the sources expander; the user question is stored on the
+  message itself as `userQuestion` so each turn's feedback carries the
+  right query string. Optimistic UI: the visual state flips on click,
+  only reverts if the API rejects the write; the button disables
+  itself after one tap to prevent accidental double-submit within the
+  same component instance
+- **Streamlit (`streamlit_app.py`)**: `_send_feedback(...)` helper +
+  buttons in `_render_sources_with_anchors(...)`, with a
+  `feedback_key_prefix` so the unique Streamlit button keys don't
+  collide across tabs / messages. Live-chat reply gets a whole-answer
+  👍 / 👎 pair under the source expander. Toast on success / failure /
+  503-disabled
+- **schemas**: `FeedbackRequest` / `FeedbackResponse` /
+  `FeedbackReportResponse` added to `backend/src/schemas.py`
+- **tests**: `backend/tests/test_feedback.py` (12 — uuid generation,
+  persistence round-trip, recent-window inclusion / exclusion, count,
+  ±1 / 0 ratings, optional doc_id / session_id / note, idempotent
+  close, factory disabled / enabled); `evaluation/tests/test_feedback_report.py`
+  (3 — empty placeholder, top-queries section, unpopular-docs section
+  + file write); `backend/tests/test_api.py` (+4 — happy-path record,
+  rating-validation 422, report endpoint round-trip, disabled-store
+  503). Existing 379 + spec_047 19 = **398 件 PASS**, 2 skipped (redis +
+  ollama optional deps), ruff 緑
+- **docs**: ADR-028 (rationale, signal-vs-noise alternatives,
+  PII / dedup / scaling consequences); CHANGELOG Day 47 (this entry)
+
 ### Day 46 (2026-05-20) — Browser extension MVP (spec_046)
 
 v0.9.0 marquee #2: one-click web page → `examples/knowledge/`. Reading an

@@ -3,24 +3,35 @@
 import { useRef, useState } from "react";
 import type { SearchResultPayload } from "@/lib/api";
 import { parseCitations } from "@/lib/citations";
+import { postFeedback } from "@/lib/feedbackClient";
 
 export interface ChatMessageData {
   role: "user" | "assistant";
   content: string;
   sources?: SearchResultPayload[];
   rewrittenQuestion?: string | null;
+  /** Original user question that produced this assistant turn. */
+  userQuestion?: string | null;
 }
 
 interface Props {
   msg: ChatMessageData;
+  sessionId?: string | null;
 }
 
-export function ChatMessage({ msg }: Props) {
+export function ChatMessage({ msg, sessionId = null }: Props) {
   const [showSources, setShowSources] = useState(false);
   const [highlightedN, setHighlightedN] = useState<number | null>(null);
   const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // spec_047: 👍 / 👎 on the whole assistant answer (separate from per-source).
+  const [answerFeedback, setAnswerFeedback] = useState<"up" | "down" | null>(null);
+  // spec_047: per-source feedback state keyed by source id.
+  const [sourceFeedback, setSourceFeedback] = useState<
+    Record<string, "up" | "down" | null>
+  >({});
   const isUser = msg.role === "user";
   const sources = msg.sources ?? [];
+  const query = msg.userQuestion ?? null;
 
   function focusCitation(n: number) {
     if (!sources[n - 1]) return;
@@ -33,6 +44,38 @@ export function ChatMessage({ msg }: Props) {
       const list = document.getElementById(`chat-srcs-${n}`);
       list?.scrollIntoView({ behavior: "smooth", block: "nearest" });
     }, 30);
+  }
+
+  // Whole-answer rating: doc_id = null so the backend stores it against the
+  // assistant turn rather than a specific source card.
+  async function sendAnswerFeedback(rating: 1 | -1) {
+    const prev = answerFeedback;
+    setAnswerFeedback(rating > 0 ? "up" : "down");
+    try {
+      await postFeedback({
+        query,
+        doc_id: null,
+        rating,
+        session_id: sessionId,
+      });
+    } catch {
+      setAnswerFeedback(prev);
+    }
+  }
+
+  async function sendSourceFeedback(docId: string, rating: 1 | -1) {
+    const prev = sourceFeedback[docId] ?? null;
+    setSourceFeedback((s) => ({ ...s, [docId]: rating > 0 ? "up" : "down" }));
+    try {
+      await postFeedback({
+        query,
+        doc_id: docId,
+        rating,
+        session_id: sessionId,
+      });
+    } catch {
+      setSourceFeedback((s) => ({ ...s, [docId]: prev }));
+    }
   }
 
   function renderBody(text: string): React.ReactNode[] {
@@ -78,6 +121,42 @@ export function ChatMessage({ msg }: Props) {
         <p className="whitespace-pre-wrap">
           {isUser ? msg.content : renderBody(msg.content)}
         </p>
+        {!isUser && (
+          <div className="mt-2 flex gap-2 text-xs">
+            <button
+              type="button"
+              aria-label="この回答は役立った"
+              aria-pressed={answerFeedback === "up"}
+              disabled={answerFeedback !== null}
+              onClick={() => sendAnswerFeedback(1)}
+              className={
+                "rounded border px-2 py-0.5 transition-colors " +
+                (answerFeedback === "up"
+                  ? "border-green-400 bg-green-100 text-green-700"
+                  : "border-slate-200 text-slate-500 hover:bg-slate-50") +
+                (answerFeedback !== null ? " disabled:cursor-default disabled:opacity-80" : "")
+              }
+            >
+              👍
+            </button>
+            <button
+              type="button"
+              aria-label="この回答は役に立たなかった"
+              aria-pressed={answerFeedback === "down"}
+              disabled={answerFeedback !== null}
+              onClick={() => sendAnswerFeedback(-1)}
+              className={
+                "rounded border px-2 py-0.5 transition-colors " +
+                (answerFeedback === "down"
+                  ? "border-red-400 bg-red-100 text-red-700"
+                  : "border-slate-200 text-slate-500 hover:bg-slate-50") +
+                (answerFeedback !== null ? " disabled:cursor-default disabled:opacity-80" : "")
+              }
+            >
+              👎
+            </button>
+          </div>
+        )}
         {!isUser && sources.length > 0 && (
           <div className="mt-2 border-t border-slate-100 pt-2 text-xs">
             <button
@@ -92,21 +171,58 @@ export function ChatMessage({ msg }: Props) {
                 {sources.map((s, idx) => {
                   const n = idx + 1;
                   const isHi = highlightedN === n;
+                  const fb = sourceFeedback[s.id] ?? null;
                   return (
                     <li
                       key={s.id}
                       id={`chat-srcs-${n}`}
                       data-highlighted={isHi ? "true" : "false"}
                       className={
-                        "rounded px-1 text-slate-600 transition-colors duration-500 " +
+                        "flex flex-wrap items-center gap-2 rounded px-1 text-slate-600 transition-colors duration-500 " +
                         (isHi ? "bg-yellow-100" : "")
                       }
                     >
-                      <span className="font-mono text-slate-400">[{n}]</span>{" "}
-                      {s.title}{" "}
-                      <span className="font-mono text-slate-400">({s.id})</span>{" "}
-                      <span className="text-slate-400">
-                        score {s.score.toFixed(3)}
+                      <span>
+                        <span className="font-mono text-slate-400">[{n}]</span>{" "}
+                        {s.title}{" "}
+                        <span className="font-mono text-slate-400">({s.id})</span>{" "}
+                        <span className="text-slate-400">
+                          score {s.score.toFixed(3)}
+                        </span>
+                      </span>
+                      <span className="ml-auto flex gap-1">
+                        <button
+                          type="button"
+                          aria-label={`[${n}] は役立った`}
+                          aria-pressed={fb === "up"}
+                          disabled={fb !== null}
+                          onClick={() => sendSourceFeedback(s.id, 1)}
+                          className={
+                            "rounded border px-1 text-[10px] " +
+                            (fb === "up"
+                              ? "border-green-400 bg-green-100 text-green-700"
+                              : "border-slate-200 text-slate-400 hover:bg-slate-50") +
+                            (fb !== null ? " disabled:cursor-default disabled:opacity-80" : "")
+                          }
+                        >
+                          👍
+                        </button>
+                        <button
+                          type="button"
+                          aria-label={`[${n}] は役に立たなかった`}
+                          aria-pressed={fb === "down"}
+                          disabled={fb !== null}
+                          onClick={() => sendSourceFeedback(s.id, -1)}
+                          className={
+                            "rounded border px-1 text-[10px] " +
+                            (fb === "down"
+                              ? "border-red-400 bg-red-100 text-red-700"
+                              : "border-slate-200 text-slate-400 hover:bg-slate-50") +
+                            (fb !== null ? " disabled:cursor-default disabled:opacity-80" : "")
+                          }
+                        >
+                          👎
+                        </button>
                       </span>
                     </li>
                   );
