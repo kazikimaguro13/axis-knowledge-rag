@@ -1,5 +1,39 @@
 # Changelog
 
+## [0.9.0] - 2026-05-20
+
+v0.9.0 marquee release: 5 user-facing features (F1–F5) plus the
+spec_051 pre-release hotfix that closed the HIGH-1 / MID-1 / MID-3
+issues flagged in the final review.
+
+### Added (F1–F5)
+- **F1 — Ollama / Llama.cpp integration** (spec_045, ADR-026)
+- **F2 — Browser Extension MVP (Chrome MV3)** (spec_046, ADR-027)
+- **F3 — Active Learning Feedback (👍 / 👎 + weekly report)** (spec_047, ADR-028)
+- **F4 — Knowledge Gap Detection (no_results / low_score / llm_no_info)** (spec_048, ADR-029)
+- **F5 — Bidirectional refs in GraphSidebar + MCP `axis_neighbors`** (spec_049, ADR-030)
+
+### Fixed (spec_051 final-review hotfix)
+- **HIGH-1**: Embedder dim mismatch silent crash on backend swap.
+  `backend/src/search.py` now builds the axis-only zero vector at
+  `embedder.dim` (was hardcoded `768`), and `backend/src/api.py`'s
+  `lifespan` probes the stored embedding dim and raises with a
+  Japanese rebuild hint when it disagrees with the configured
+  embedder.
+- **MID-3**: `detect_no_info` regex was too loose — partial answers
+  like "A は X ですが、B はわかりません、しかし C は Y です。" were
+  flagged as a knowledge gap. Anchored the `わかりません` / `不明です`
+  variants on end-of-string so they must terminate the answer.
+- **MID-1**: `/api/ingest` was unauthenticated by default and the CORS
+  regex was open. Added opt-in `AXIS_INGEST_TOKEN` env-based auth:
+  unset → v0.8 behaviour (no auth), set → every request must carry a
+  matching `X-Axis-Token` header. README + `docs/deployment.md`
+  document the recommended `uvicorn --host 127.0.0.1` setup.
+
+### Tests
+- +7 tests (dim mismatch ×2, regex false-positive guard ×3, ingest
+  token ×2). All 419 pre-existing tests still green → 426 total.
+
 ## [Unreleased]
 
 ### Day 49 (2026-05-20) — Bidirectional refs in GraphSidebar (spec_049)
