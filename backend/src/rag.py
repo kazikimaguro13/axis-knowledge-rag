@@ -383,18 +383,26 @@ class DummyGenerationBackend:
 def make_generation_backend(cfg: GenerationConfig | None = None) -> GenerationBackend:
     """Build a :class:`GenerationBackend` from :class:`GenerationConfig`.
 
-    - ``cfg is None`` → defaults (``backend="claude"``).
-    - ``backend="claude"``: Anthropic client; auto-falls back to dummy when
+    - ``cfg is None`` → defaults (``backend="auto"``).
+    - ``backend="auto"`` (spec_052 default): prefer Claude when
+      ``ANTHROPIC_API_KEY`` is set, else Gemini when ``GEMINI_API_KEY`` is
+      set, else DUMMY. Lets users without an Anthropic key still get a
+      real generation step from the Gemini key they already had for the
+      embedder.
+    - ``backend="claude"``: Anthropic client; auto-falls back to DUMMY when
       ``ANTHROPIC_API_KEY`` is missing (v0.8.1 behaviour).
-    - ``backend="ollama"``: spec_045 on-prem chat path. Falls back to dummy
+    - ``backend="gemini"``: ``google-generativeai`` chat. Falls back to
+      DUMMY on missing key / SDK error.
+    - ``backend="ollama"``: spec_045 on-prem chat path. Falls back to DUMMY
       on ImportError / connection failure so callers never crash at startup.
-    - ``backend="dummy"``: explicit dummy.
+    - ``backend="dummy"``: explicit DUMMY.
     """
     if cfg is None:
         from backend.src.config import GenerationConfig as _GC
 
         cfg = _GC()
-    backend = (cfg.backend or "claude").lower()
+    backend = (cfg.backend or "auto").lower()
+
     if backend == "ollama":
         try:
             return OllamaBackend(model=cfg.ollama.model, url=cfg.ollama.url)
@@ -403,14 +411,48 @@ def make_generation_backend(cfg: GenerationConfig | None = None) -> GenerationBa
                 "Ollama generation backend failed (%s), falling back to DUMMY", e
             )
             return DummyGenerationBackend()
+
+    if backend == "gemini":
+        gemini_model = getattr(getattr(cfg, "gemini", None), "model", GeminiBackend.DEFAULT_MODEL)
+        try:
+            return GeminiBackend(model=gemini_model)
+        except Exception as e:  # noqa: BLE001
+            logger.warning(
+                "Gemini generation backend failed (%s), falling back to DUMMY", e
+            )
+            return DummyGenerationBackend()
+
     if backend == "dummy":
         return DummyGenerationBackend()
-    if not settings.anthropic_api_key:
-        logger.warning("RAGPipeline running in DUMMY mode (no ANTHROPIC_API_KEY)")
+
+    if backend == "auto":
+        if settings.anthropic_api_key:
+            return ClaudeBackend(model=DEFAULT_MODEL)
+        if settings.gemini_api_key:
+            gemini_model = getattr(
+                getattr(cfg, "gemini", None), "model", GeminiBackend.DEFAULT_MODEL
+            )
+            try:
+                return GeminiBackend(model=gemini_model)
+            except Exception as e:  # noqa: BLE001
+                logger.warning(
+                    "auto: Gemini generation backend failed (%s), falling back to DUMMY",
+                    e,
+                )
+                return DummyGenerationBackend()
+        logger.warning(
+            "auto: no ANTHROPIC_API_KEY or GEMINI_API_KEY → DUMMY generation"
+        )
         return DummyGenerationBackend()
-    if backend != "claude":
-        logger.warning("Unknown generation backend %r, falling back to claude", backend)
-    return ClaudeBackend(model=DEFAULT_MODEL)
+
+    if backend == "claude":
+        if not settings.anthropic_api_key:
+            logger.warning("RAGPipeline running in DUMMY mode (no ANTHROPIC_API_KEY)")
+            return DummyGenerationBackend()
+        return ClaudeBackend(model=DEFAULT_MODEL)
+
+    logger.warning("Unknown generation backend %r, falling back to DUMMY", backend)
+    return DummyGenerationBackend()
 
 
 class RAGPipeline:
