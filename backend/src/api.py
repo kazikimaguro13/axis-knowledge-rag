@@ -2,11 +2,12 @@
 
 import asyncio
 import logging
+import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from importlib.metadata import PackageNotFoundError, version
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.src.config import (
@@ -68,6 +69,23 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app_cfg = load_app_config()
     embedder = make_embedder(app_cfg.embedder)
     normalizer = Normalizer.from_config(load_axes_config())
+    # spec_051 HIGH-1: detect embedder ↔ index dim mismatch at startup.
+    # Empty store (probe returns None) skips silently — first ingest will
+    # set the dim. A mismatch is fatal because every subsequent query
+    # would crash inside Chroma with an opaque shape error.
+    try:
+        store_dim = store.probe_dim()
+    except Exception as e:  # noqa: BLE001
+        logger.warning("dim verification skipped: %s", e)
+        store_dim = None
+    if store_dim is not None and store_dim != embedder.dim:
+        raise RuntimeError(
+            f"Embedding dim mismatch: chroma store has dim={store_dim}, "
+            f"embedder ({type(embedder).__name__}) reports dim={embedder.dim}. "
+            f"config.yml で embedder.backend を変更した場合は "
+            f"`PYTHONPATH=. python3 -m scripts.build_index examples/knowledge --rebuild` "
+            f"を実行して index を rebuild してください。"
+        )
     pd = app_cfg.retrieval.parent_doc
     if pd.enabled and not store.has_parents():
         logger.warning(
@@ -242,11 +260,31 @@ async def get_axes() -> AxesResponse:
 
 # ---------------------------------------------------------------------------
 # spec_046: /api/ingest — browser-extension capture
+# spec_051 MID-1: opt-in token auth — when AXIS_INGEST_TOKEN is set in the
+# environment, every request must carry a matching ``X-Axis-Token`` header.
+# When unset, behaviour is the v0.8 default (no auth) so existing local-only
+# deployments keep working without config changes.
 # ---------------------------------------------------------------------------
 
 
+def _require_ingest_token(x_axis_token: str | None) -> None:
+    """401 when AXIS_INGEST_TOKEN is configured and the header doesn't match.
+
+    Read at call-time (not at import) so tests can monkey-patch
+    ``os.environ`` after the app has been built.
+    """
+    expected = (os.environ.get("AXIS_INGEST_TOKEN", "") or "").strip()
+    if not expected:
+        return
+    if x_axis_token != expected:
+        raise HTTPException(status_code=401, detail="invalid or missing X-Axis-Token")
+
+
 @app.post("/api/ingest", response_model=IngestResponse)
-async def post_ingest(req: IngestRequest) -> IngestResponse:
+async def post_ingest(
+    req: IngestRequest,
+    x_axis_token: str | None = Header(default=None, alias="X-Axis-Token"),
+) -> IngestResponse:
     """Persist a captured web page as YAML+Markdown under ``knowledge_dir``.
 
     The browser extension posts URL + title + body (+ optional user
@@ -254,6 +292,7 @@ async def post_ingest(req: IngestRequest) -> IngestResponse:
     operation is intentionally non-idempotent — every call yields a new
     timestamped file, which is also how name collisions are avoided.
     """
+    _require_ingest_token(x_axis_token)
 
     # Lazy import keeps the ingest_web module out of the cold-start path for
     # deployments that never use the browser extension.

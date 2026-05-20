@@ -250,6 +250,63 @@ def test_post_ingest_invalid_body_422() -> None:
 
 
 # ---------------------------------------------------------------------------
+# spec_051 MID-1: AXIS_INGEST_TOKEN opt-in auth
+# ---------------------------------------------------------------------------
+
+
+def test_post_ingest_requires_token_when_env_set(tmp_path, monkeypatch) -> None:
+    """When AXIS_INGEST_TOKEN is set, a request without (or with the wrong)
+    X-Axis-Token header is rejected with 401."""
+    from backend.src import api as api_module
+
+    monkeypatch.setenv("AXIS_INGEST_TOKEN", "secret-abc-123")
+    with TestClient(app) as client:
+        api_module._state["knowledge_dir"] = str(tmp_path)
+        # No header → 401
+        resp = client.post(
+            "/api/ingest",
+            json={
+                "url": "https://example.com/article",
+                "title": "Sample",
+                "body": "hello",
+            },
+        )
+        assert resp.status_code == 401, resp.text
+        # Wrong header → 401
+        resp2 = client.post(
+            "/api/ingest",
+            headers={"X-Axis-Token": "wrong"},
+            json={
+                "url": "https://example.com/article",
+                "title": "Sample",
+                "body": "hello",
+            },
+        )
+        assert resp2.status_code == 401
+
+
+def test_post_ingest_passes_with_correct_token(tmp_path, monkeypatch) -> None:
+    """Matching token in X-Axis-Token header → 200 + file persisted."""
+    from backend.src import api as api_module
+
+    monkeypatch.setenv("AXIS_INGEST_TOKEN", "secret-abc-123")
+    with TestClient(app) as client:
+        api_module._state["knowledge_dir"] = str(tmp_path)
+        resp = client.post(
+            "/api/ingest",
+            headers={"X-Axis-Token": "secret-abc-123"},
+            json={
+                "url": "https://example.com/article",
+                "title": "Sample",
+                "body": "hello",
+            },
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["doc_id"].startswith("web_")
+
+
+# ---------------------------------------------------------------------------
 # spec_047: /api/feedback + /api/feedback/report
 # ---------------------------------------------------------------------------
 

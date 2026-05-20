@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "axis-knowledge-rag"
-version = "0.8.1"
+version = "0.9.0"
 description = "Axis-based search + RAG over YAML frontmatter Markdown knowledge (Local-first OSS)"
 readme = "README.md"
 license = { text = "MIT" }

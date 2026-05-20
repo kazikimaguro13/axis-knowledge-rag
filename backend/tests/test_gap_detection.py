@@ -78,6 +78,29 @@ def test_detect_no_info_empty_string_treated_as_gap() -> None:
 
 
 # ---------------------------------------------------------------------------
+# spec_051 MID-3: detect_no_info false positive guard
+# ---------------------------------------------------------------------------
+
+
+def test_detect_no_info_partial_answer_is_false() -> None:
+    """spec_051: an answer that admits ignorance about ONE sub-topic but
+    still delivers content on others is NOT a knowledge gap."""
+    text = "A は X ですが、B はわかりません、しかし C は Y です。"
+    assert detect_no_info(text) is False
+
+
+def test_detect_no_info_sentence_end_wakarimasen_is_true() -> None:
+    """The trailing-sentence variant must still fire — true positive
+    must be preserved after the regex tightening."""
+    assert detect_no_info("結論はわかりません。") is True
+
+
+def test_detect_no_info_fumei_at_sentence_end() -> None:
+    """Same for 不明です — sentence-end termination should match."""
+    assert detect_no_info("状態は不明です。") is True
+
+
+# ---------------------------------------------------------------------------
 # SqliteGapStore
 # ---------------------------------------------------------------------------
 

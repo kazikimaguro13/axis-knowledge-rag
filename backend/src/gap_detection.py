@@ -172,8 +172,13 @@ NO_INFO_PATTERNS: list[str] = [
     r"提供された(資料|文書|context|情報)(に|には)?(記載|情報)?(が)?(ない|ありません)",
     r"該当(する|の)?(資料|文書|情報)(は|が)?(ない|ありません|見当たりません)",
     r"情報(が)?(ない|ありません|ございません|不明)です",
-    r"わかりません",
-    r"不明です",
+    # spec_051 MID-3: "わかりません" / "不明です" must terminate the answer
+    # (final sentence), not appear as an aside inside a partial answer
+    # like "A は X ですが、B はわかりません、しかし C は Y です。" where it
+    # is followed by 、 + more content. Anchor the right side on
+    # end-of-string, optionally preceded by a 。 + trailing whitespace.
+    r"わかりません(?:。\s*\Z|\Z)",
+    r"不明です(?:。\s*\Z|\Z)",
     r"答えられません",
     # English
     r"I (do not|don't) have (the |enough )?information",

@@ -155,6 +155,37 @@ class VectorStore:
     def count(self) -> int:
         return self._collection.count()
 
+    def probe_dim(self) -> int | None:
+        """Return the stored embedding dim, or ``None`` if the store is empty.
+
+        spec_051 HIGH-1: used by ``api.lifespan`` to detect embedder /
+        index dim mismatch on startup. Pulls a single row with
+        ``include=["embeddings"]`` so the cost is independent of
+        collection size. Chroma returns embeddings as a numpy array,
+        so guard with ``len()`` rather than ``or`` truthiness which
+        raises on multi-element arrays.
+        """
+        try:
+            raw = self._collection.get(limit=1, include=["embeddings"])
+        except Exception as e:  # noqa: BLE001
+            logger.debug("probe_dim failed: %s", e)
+            return None
+        embs = raw.get("embeddings")
+        if embs is None:
+            return None
+        try:
+            if len(embs) == 0:
+                return None
+            first = embs[0]
+        except TypeError:
+            return None
+        if first is None:
+            return None
+        try:
+            return int(len(first))
+        except TypeError:
+            return None
+
     def query(
         self,
         embedding: list[float],
