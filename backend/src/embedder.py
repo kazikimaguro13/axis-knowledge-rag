@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 EMBEDDING_DIM = 768  # Gemini text-embedding-004 + DummyEmbedder default
-_GEMINI_MODEL = "text-embedding-004"
+_GEMINI_MODEL = "gemini-embedding-001"  # text-embedding-004 was retired from v1beta API (2026-05)
 
 
 # ---------------------------------------------------------------------------
@@ -127,7 +127,11 @@ class GeminiEmbedder:
     def embed(self, text: str) -> list[float]:
         if self._use_dummy:
             return _dummy_embedding(text)
-        result = self._genai.embed_content(model=_GEMINI_MODEL, content=text)
+        result = self._genai.embed_content(
+            model=_GEMINI_MODEL,
+            content=text,
+            output_dimensionality=self.DIM,  # keep 768 dim for index compat
+        )
         return list(result["embedding"])
 
     def embed_batch(self, texts: Sequence[str]) -> list[list[float]]:
