@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from datasets import Dataset
-from ragas import evaluate
+from ragas import RunConfig, evaluate
 from ragas.metrics import (
     answer_relevancy,
     context_precision,
@@ -113,6 +113,7 @@ def main() -> int:
         metrics=METRICS,
         llm=get_judge_llm(),
         embeddings=get_judge_embeddings(),
+        run_config=RunConfig(max_workers=4, max_retries=10, timeout=60),
     )
 
     scores = {m.name: float(result[m.name]) for m in METRICS}
