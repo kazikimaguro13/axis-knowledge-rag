@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>axis-knowledge-rag capture</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <h2>axis-knowledge-rag</h2>
+    <div id="info">
+      <div class="row"><label>URL</label><span id="url"></span></div>
+      <div class="row"><label>Title</label><span id="title"></span></div>
+    </div>
+    <button id="save-btn" type="button">Save to knowledge</button>
+    <div id="status" role="status" aria-live="polite"></div>
+    <hr />
+    <details>
+      <summary>Settings</summary>
+      <label class="setting"
+        >API endpoint
+        <input id="endpoint" type="text" value="http://localhost:8000" />
+      </label>
+      <button id="save-settings" type="button">Save</button>
+    </details>
+    <script src="popup.js"></script>
+  </body>
+</html>
