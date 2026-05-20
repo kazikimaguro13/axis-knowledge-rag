@@ -445,3 +445,150 @@ def test_rag_pipeline_uses_injected_ollama_backend(
     assert ans.is_dummy is False
     assert "[1]" in ans.text
     assert ans.model == "llama3"
+
+
+# ---------------------------------------------------------------------------
+# spec_052: GeminiBackend + auto fallback chain
+# ---------------------------------------------------------------------------
+
+
+def _install_fake_genai(
+    monkeypatch: pytest.MonkeyPatch, reply: str = "Gemini reply[1]."
+):
+    """Inject a fake ``google.generativeai`` module so GeminiBackend
+    constructs and ``generate_content`` returns a deterministic response."""
+    import sys
+    from unittest.mock import MagicMock
+
+    captured: dict = {"prompt": None, "generation_config": None, "model_name": None}
+
+    class _FakeResp:
+        text = reply
+
+    class _FakeModel:
+        def __init__(self, name: str) -> None:
+            captured["model_name"] = name
+
+        def generate_content(self, prompt, generation_config=None):  # noqa: ANN001
+            captured["prompt"] = prompt
+            captured["generation_config"] = generation_config
+            return _FakeResp()
+
+    fake = MagicMock()
+    fake.configure = MagicMock()
+    fake.GenerativeModel = _FakeModel
+    monkeypatch.setitem(sys.modules, "google.generativeai", fake)
+    return captured, fake
+
+
+def _stub_settings(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    anthropic_api_key: str | None = None,
+    gemini_api_key: str | None = None,
+) -> None:
+    """Replace the frozen ``settings`` singleton inside ``rag.py`` with a
+    plain namespace so factory branches can be exercised without depending
+    on the CI env. Frozen dataclasses reject attribute writes, so we swap
+    the binding instead of mutating fields."""
+    import types
+
+    from backend.src import rag as rag_mod
+
+    fake = types.SimpleNamespace(
+        anthropic_api_key=anthropic_api_key,
+        gemini_api_key=gemini_api_key,
+    )
+    monkeypatch.setattr(rag_mod, "settings", fake)
+
+
+def test_gemini_backend_init_requires_api_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """GeminiBackend(api_key=None) with no env var → RuntimeError."""
+    from backend.src.rag import GeminiBackend
+
+    _install_fake_genai(monkeypatch)
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    _stub_settings(monkeypatch, anthropic_api_key=None, gemini_api_key=None)
+
+    with pytest.raises(RuntimeError, match="GEMINI_API_KEY"):
+        GeminiBackend(api_key=None)
+
+
+def test_gemini_backend_generate_basic_mock(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """GeminiBackend.generate(...) returns text from a mocked SDK response."""
+    from backend.src.rag import GeminiBackend
+
+    captured, _fake = _install_fake_genai(monkeypatch, reply="Gemini test reply[1].")
+
+    b = GeminiBackend(model="gemini-2.5-flash", api_key="fake-key")
+    out = b.generate(
+        system="SYS",
+        messages=[{"role": "user", "content": "hi"}],
+        max_tokens=256,
+    )
+    assert out == "Gemini test reply[1]."
+    assert b.is_dummy is False
+    assert b.model_name == "gemini-2.5-flash"
+    # System prompt + user content folded into the single prompt body.
+    assert "SYS" in captured["prompt"]
+    assert "hi" in captured["prompt"]
+    assert captured["generation_config"]["max_output_tokens"] == 256
+    assert captured["model_name"] == "gemini-2.5-flash"
+
+
+def test_make_generation_backend_auto_prefers_claude(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """auto + both keys set → ClaudeBackend wins over Gemini."""
+    import sys
+    from unittest.mock import MagicMock
+
+    from backend.src.config import GenerationConfig
+    from backend.src.rag import ClaudeBackend, make_generation_backend
+
+    _stub_settings(
+        monkeypatch,
+        anthropic_api_key="fake-anthropic",
+        gemini_api_key="fake-gemini",
+    )
+
+    # Stub anthropic so ClaudeBackend(...) constructs without network.
+    fake_anthropic = MagicMock()
+    fake_anthropic.Anthropic = MagicMock(return_value=MagicMock())
+    monkeypatch.setitem(sys.modules, "anthropic", fake_anthropic)
+
+    b = make_generation_backend(GenerationConfig(backend="auto"))
+    assert isinstance(b, ClaudeBackend)
+
+
+def test_make_generation_backend_auto_fallback_to_gemini(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """auto + only GEMINI_API_KEY set → GeminiBackend."""
+    from backend.src.config import GenerationConfig
+    from backend.src.rag import GeminiBackend, make_generation_backend
+
+    _install_fake_genai(monkeypatch)
+    _stub_settings(monkeypatch, anthropic_api_key=None, gemini_api_key="fake-gemini")
+
+    b = make_generation_backend(GenerationConfig(backend="auto"))
+    assert isinstance(b, GeminiBackend)
+    assert b.is_dummy is False
+
+
+def test_make_generation_backend_auto_both_unset_returns_dummy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """auto + no API keys → DummyGenerationBackend."""
+    from backend.src.config import GenerationConfig
+    from backend.src.rag import DummyGenerationBackend, make_generation_backend
+
+    _stub_settings(monkeypatch, anthropic_api_key=None, gemini_api_key=None)
+
+    b = make_generation_backend(GenerationConfig(backend="auto"))
+    assert isinstance(b, DummyGenerationBackend)
+    assert b.is_dummy is True
