@@ -24,6 +24,7 @@ from backend.src.bm25_index import BM25Index
 from backend.src.chunker import ParentChunk
 from backend.src.config import TimeDecayConfig
 from backend.src.embedder import Embedder, make_embedder
+from backend.src.gap_detection import GapStore
 from backend.src.graph import KnowledgeGraph
 from backend.src.normalizer import Normalizer
 from backend.src.vector_store import VectorStore
@@ -156,6 +157,8 @@ class SearchEngine:
         top_k_children: int = 20,
         time_decay_config: TimeDecayConfig | None = None,
         graph: KnowledgeGraph | None = None,
+        gap_store: GapStore | None = None,
+        gap_low_score_threshold: float = 0.35,
     ) -> None:
         self._store = store
         self._embedder = embedder
@@ -165,6 +168,10 @@ class SearchEngine:
         self._top_k_children = top_k_children
         self._time_decay_config = time_decay_config
         self._graph = graph
+        # spec_048: gap hook is optional — None makes every call a no-op so
+        # `gap.enabled=false` truly has zero hot-path overhead.
+        self._gap_store = gap_store
+        self._gap_low_score_threshold = float(gap_low_score_threshold)
         if parent_doc_enabled and not store.parents:
             # Try lazy-load from sidecar so callers can build the engine
             # without remembering the load step.
@@ -234,6 +241,7 @@ class SearchEngine:
                 pd_results = self._expand_with_graph(
                     pd_results, hop=graph_hop, max_neighbors=graph_max_neighbors
                 )
+            self._record_gap(query, pd_results)
             return pd_results
 
         if query is None:
@@ -296,7 +304,44 @@ class SearchEngine:
             graph_expand,
             len(results),
         )
+        self._record_gap(query, results)
         return results
+
+    # -----------------------------------------------------------------
+    # spec_048: knowledge-gap detection hook
+    # -----------------------------------------------------------------
+
+    def _record_gap(
+        self, query: str | None, results: list[SearchResult]
+    ) -> None:
+        """Post-hoc hook: log when a search returned nothing useful.
+
+        Skipped when the engine wasn't built with a ``gap_store`` (which
+        is the case in tests + when ``gap.enabled=false``). Two events
+        get recorded: empty hit list → ``no_results``; non-empty but the
+        top score is below ``low_score_threshold`` → ``low_score``.
+        Axis-only queries (``query is None``) are skipped — those are
+        listing/filter calls, not knowledge questions.
+        """
+        if self._gap_store is None or not query:
+            return
+        try:
+            if not results:
+                self._gap_store.record(
+                    query=query, reason="no_results", n_results=0
+                )
+                return
+            top = float(results[0].score)
+            if top < self._gap_low_score_threshold:
+                self._gap_store.record(
+                    query=query,
+                    reason="low_score",
+                    top_score=top,
+                    n_results=len(results),
+                )
+        except Exception as e:  # noqa: BLE001
+            # The gap path must never fail the search. Log + swallow.
+            logger.warning("gap store record failed: %s", e)
 
     # -----------------------------------------------------------------
     # spec_031: parent-document retrieval path
