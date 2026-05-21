@@ -41,6 +41,7 @@ DEFAULT_MAX_CHILD_TOKENS = 256
 _H2_RE = re.compile(r"(?m)^(##\s+.+)$")
 _H3_PLUS_RE = re.compile(r"(?m)^(#{3,}\s+.+)$")
 _SLUG_STRIP_RE = re.compile(r"[^a-z0-9]+")
+_ASCII_ALPHA_RE = re.compile(r"[a-z]")
 
 
 @dataclass(frozen=True)
@@ -129,9 +130,17 @@ def chunk_markdown(
 
     parents: list[ParentChunk] = []
     children: list[ChildChunk] = []
+    seen_parent_ids: dict[str, int] = {}
 
     for sec_title, sec_body in sections:
-        parent_id = _make_parent_id(doc_id, sec_title)
+        base_parent_id = _make_parent_id(doc_id, sec_title)
+        # Final dedup safety net: if two H2s in the same doc still collide
+        # (same title text → identical slug or identical md5), suffix the
+        # 2nd, 3rd, ... occurrence with -2, -3, ... so parent_id stays unique
+        # and the dependent child_ids never duplicate downstream in Chroma.
+        count = seen_parent_ids.get(base_parent_id, 0)
+        seen_parent_ids[base_parent_id] = count + 1
+        parent_id = base_parent_id if count == 0 else f"{base_parent_id}-{count + 1}"
         parent_text = sec_body.strip()
         parents.append(
             ParentChunk(
@@ -311,15 +320,31 @@ def _split_by_sentence(text: str, max_chars: int) -> list[str]:
 def _make_parent_id(doc_id: str, title: str) -> str:
     """Deterministic ``{doc_id}#{slug}`` parent identifier.
 
-    The slug is ASCII-folded from the title; CJK / unsupported titles fall
-    back to an md5-hex prefix so the id stays stable across runs but never
-    contains arbitrary unicode (which would break Chroma metadata keys
-    and JSON-key portability).
+    The slug is ASCII-folded from the title; titles that fold to a "weak"
+    slug (empty, or numeric/symbol-only with no ASCII letters — e.g.
+    JP "## 1. 目的" → "1") fall back to an md5-hex prefix of the
+    NFKC-normalized title. This keeps the id stable across runs and
+    avoids parent_id collisions when two JP H2s share the same numeric
+    prefix (spec_055). ASCII-strong slugs like "rag-patterns" are kept
+    verbatim for backwards compatibility.
     """
     slug = _slugify(title)
-    if not slug:
-        slug = hashlib.md5(title.encode("utf-8")).hexdigest()[:8]
+    if not _is_strong_slug(slug):
+        normalized = unicodedata.normalize("NFKC", title or "")
+        slug = hashlib.md5(normalized.encode("utf-8")).hexdigest()[:8]
     return f"{doc_id}#{slug}"
+
+
+def _is_strong_slug(slug: str) -> bool:
+    """A slug is "strong" iff it contains at least one ASCII [a-z] letter.
+
+    Empty slugs and numeric/symbol-only slugs ("1", "3-1", "2-") are weak
+    and must be replaced with a hash to avoid collisions across JP titles
+    that ASCII-fold to the same residue.
+    """
+    if not slug:
+        return False
+    return bool(_ASCII_ALPHA_RE.search(slug))
 
 
 def _slugify(title: str) -> str:

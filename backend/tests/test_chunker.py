@@ -161,3 +161,74 @@ def test_dataclasses_are_frozen() -> None:
 
 def test_default_max_child_tokens_constant() -> None:
     assert DEFAULT_MAX_CHILD_TOKENS == 256
+
+
+# ---------------------------------------------------------------------------
+# spec_055: JP heading parent_id uniqueness + ASCII backwards compat
+# ---------------------------------------------------------------------------
+
+
+def test_jp_numbered_headings_yield_unique_parent_and_child_ids() -> None:
+    """JP H2s whose ASCII fold collapses to numbers (## 1. 目的, ## 2. 制約)
+    must still produce unique parent_ids and child_ids — the v0.9.2 chunker
+    folded both to "1"/"2" and re-collided child_ids in Chroma (spec_055)."""
+    body = (
+        "## 1. 目的\n\n本文 1。\n\n"
+        "## 2. 制約\n\n本文 2。\n\n"
+        "## 3. やってほしいこと\n\n本文 3。\n\n"
+        "## 補足\n\n初出。\n\n"
+        "## 補足\n\n再掲。\n"
+    )
+    parents, children = chunk_markdown("spec_055.md", body, {})
+    assert len(parents) == 5
+    parent_ids = [p.parent_id for p in parents]
+    assert len(set(parent_ids)) == len(parent_ids), f"parent_id collision: {parent_ids}"
+    child_ids = [c.child_id for c in children]
+    assert len(set(child_ids)) == len(child_ids), f"child_id collision: {child_ids}"
+    # Every parent_id is prefixed with the doc id and contains a #-slug
+    for pid in parent_ids:
+        assert pid.startswith("spec_055.md#")
+    # The two "## 補足" headings collide on title text → second gets -2 suffix
+    fukusoku_ids = [pid for pid in parent_ids if pid.endswith("-2")]
+    assert len(fukusoku_ids) == 1, f"expected exactly one -2 suffix, got {parent_ids}"
+
+
+def test_jp_only_heading_uses_md5_hash_slug() -> None:
+    """Weak slugs (numeric-only after ASCII fold) fall back to md5 hex."""
+    body = "## 1. 目的\n\n本文。"
+    parents, _ = chunk_markdown("spec_055.md", body, {})
+    suffix = parents[0].parent_id.split("#", 1)[1]
+    # Not the naive ASCII slug "1" anymore — must be the 8-char md5 hex.
+    assert suffix != "1"
+    assert len(suffix) == 8
+    assert all(ch in "0123456789abcdef" for ch in suffix)
+
+
+def test_ascii_heading_parent_id_unchanged() -> None:
+    """Strong ASCII slugs (e.g. ## RAG Patterns) must keep the legacy
+    doc#slug form so the demo corpus / fixture IDs stay byte-identical."""
+    body = (
+        "## RAG Patterns\n\nFoo.\n\n"
+        "## Vector Search\n\nBar.\n\n"
+        "## Future Roadmap\n\nBaz.\n"
+    )
+    parents, _ = chunk_markdown("kb/legacy.md", body, {})
+    pids = [p.parent_id for p in parents]
+    assert pids == [
+        "kb/legacy.md#rag-patterns",
+        "kb/legacy.md#vector-search",
+        "kb/legacy.md#future-roadmap",
+    ]
+
+
+def test_mixed_ascii_and_jp_headings_keep_ascii_slugs() -> None:
+    """A doc that mixes ASCII and JP H2s keeps the ASCII slug for the ASCII
+    sections and uses md5 only for the JP ones."""
+    body = "## Setup\n\nA.\n\n## 1. 目的\n\nB.\n\n## Cleanup\n\nC.\n"
+    parents, _ = chunk_markdown("kb/mixed.md", body, {})
+    pids = [p.parent_id for p in parents]
+    assert pids[0] == "kb/mixed.md#setup"
+    assert pids[2] == "kb/mixed.md#cleanup"
+    jp_suffix = pids[1].split("#", 1)[1]
+    assert len(jp_suffix) == 8
+    assert all(ch in "0123456789abcdef" for ch in jp_suffix)
