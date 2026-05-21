@@ -168,6 +168,36 @@ class IngestRequest(BaseModel):
 class IngestResponse(BaseModel):
     saved_path: str
     doc_id: str
+    # spec_056: live ingest fields. ``indexed`` is True when the chunks have
+    # been merged into the running vector store; ``parents`` / ``children``
+    # report the count produced by the on-the-fly chunker. Older clients
+    # ignore them safely (optional with defaults).
+    indexed: bool = False
+    parents: int = 0
+    children: int = 0
+
+
+# ---------------------------------------------------------------------------
+# spec_056: live memo ingest (POST /api/ingest/memo)
+# ---------------------------------------------------------------------------
+
+
+class MemoIngestRequest(BaseModel):
+    """Either ``markdown`` (full YAML+md string) or ``path`` (relative to
+    ``knowledge_dir``) must be provided. ``markdown`` wins when both are set.
+    """
+
+    markdown: str | None = Field(default=None, max_length=500_000)
+    path: str | None = Field(default=None, max_length=500)
+
+
+class MemoIngestResponse(BaseModel):
+    doc_id: str
+    saved_path: str
+    parents: int
+    children: int
+    deleted_existing: int = 0
+    indexed: bool = True
 
 
 # ---------------------------------------------------------------------------

@@ -6,6 +6,7 @@ import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from importlib.metadata import PackageNotFoundError, version
+from pathlib import Path
 
 from fastapi import FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -47,6 +48,8 @@ from backend.src.schemas import (
     HealthResponse,
     IngestRequest,
     IngestResponse,
+    MemoIngestRequest,
+    MemoIngestResponse,
     NeighborResponse,
     SearchRequest,
     SearchResponse,
@@ -151,6 +154,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     _state["engine"] = engine
     _state["rag"] = rag
     _state["embedder"] = embedder
+    # spec_056: keep the live VectorStore + Normalizer so /api/ingest/memo can
+    # add chunks against the same collection the engine is querying — drop+
+    # recreate would invalidate the engine's collection handle.
+    _state["store"] = store
+    _state["normalizer"] = normalizer
+    _state["retrieval_cfg"] = app_cfg.retrieval
     _state["axes_cfg"] = load_axes_config()
     _state["chat_store"] = chat_store
     _state["chat_cfg"] = app_cfg.chat
@@ -291,6 +300,12 @@ async def post_ingest(
     selection); we write a fresh ``web_<timestamp>_<slug>.md`` file. The
     operation is intentionally non-idempotent — every call yields a new
     timestamped file, which is also how name collisions are avoided.
+
+    spec_056: after saving the file we also push it through the live-ingest
+    path so it becomes searchable + visible in /api/graph without a backend
+    restart. Index / graph failures are logged but do not fail the request —
+    the file is already on disk and a future ``build_index --rebuild`` will
+    recover. ``indexed`` in the response signals whether the chunks landed.
     """
     _require_ingest_token(x_axis_token)
 
@@ -309,7 +324,163 @@ async def post_ingest(
         )
     except OSError as e:
         raise HTTPException(status_code=500, detail=f"failed to write file: {e}") from e
-    return IngestResponse(saved_path=str(path), doc_id=path.stem)
+
+    indexed = False
+    parents = 0
+    children = 0
+    try:
+        result = _live_ingest_path(path)
+        indexed = True
+        parents = result.parents
+        children = result.children
+        _rebuild_graph_state()
+    except Exception as e:  # noqa: BLE001
+        logger.warning("live ingest failed for %s: %s", path, e, exc_info=True)
+
+    return IngestResponse(
+        saved_path=str(path),
+        doc_id=path.stem,
+        indexed=indexed,
+        parents=parents,
+        children=children,
+    )
+
+
+# ---------------------------------------------------------------------------
+# spec_056: live memo ingest — POST /api/ingest/memo
+# ---------------------------------------------------------------------------
+
+
+def _live_ingest_path(path: Path):
+    """Run live ingest against ``_state``-bound store / embedder / normalizer.
+
+    Kept as a thin shim so endpoints stay declarative. Raises HTTPException
+    when the live-ingest dependencies were not initialised (lifespan bug).
+    """
+    from backend.src.live_ingest import ingest_file
+
+    store: VectorStore | None = _state.get("store")
+    embedder = _state.get("embedder")
+    normalizer = _state.get("normalizer")
+    if store is None or embedder is None or normalizer is None:
+        raise HTTPException(status_code=503, detail="live ingest not ready")
+    retrieval = _state.get("retrieval_cfg")
+    max_child_tokens = (
+        retrieval.parent_doc.max_child_tokens
+        if retrieval is not None
+        else 256
+    )
+    return ingest_file(
+        path,
+        store=store,
+        embedder=embedder,
+        normalizer=normalizer,
+        max_child_tokens=max_child_tokens,
+    )
+
+
+def _rebuild_graph_state() -> None:
+    """Rebuild the in-memory KnowledgeGraph from the current knowledge_dir.
+
+    Cheap (~ms per 100 docs) — networkx + frontmatter parse, no embedding.
+    Failures are logged but do not propagate; the previous graph keeps
+    serving /api/graph if rebuild fails for any reason.
+    """
+    graph_cfg = _state.get("graph_cfg")
+    if graph_cfg is None or not getattr(graph_cfg, "enabled", False):
+        return
+    knowledge_dir = _state.get("knowledge_dir", graph_cfg.knowledge_dir)
+    try:
+        _state["graph"] = build_default_graph(knowledge_dir)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("knowledge graph rebuild failed: %s", e, exc_info=True)
+
+
+def _resolve_memo_path(req: MemoIngestRequest, knowledge_dir: Path) -> Path:
+    """Return the on-disk path for a /api/ingest/memo request.
+
+    ``markdown`` wins over ``path``; we write the supplied text to
+    ``<knowledge_dir>/<frontmatter.id>.md``. ``path`` mode points to an
+    existing file inside ``knowledge_dir`` (relative or absolute, but the
+    resolved path must live under ``knowledge_dir`` to prevent path
+    traversal).
+    """
+    import frontmatter
+
+    knowledge_dir = knowledge_dir.resolve()
+    knowledge_dir.mkdir(parents=True, exist_ok=True)
+    if req.markdown:
+        try:
+            post = frontmatter.loads(req.markdown)
+        except Exception as e:  # noqa: BLE001
+            raise HTTPException(status_code=400, detail=f"invalid markdown frontmatter: {e}") from e
+        doc_id = post.metadata.get("id")
+        if not doc_id or not isinstance(doc_id, str):
+            raise HTTPException(
+                status_code=400,
+                detail="markdown frontmatter must contain a non-empty 'id' field",
+            )
+        safe_id = doc_id.replace("/", "_").replace("\\", "_").strip()
+        if not safe_id:
+            raise HTTPException(status_code=400, detail="frontmatter 'id' is empty after sanitization")
+        target = (knowledge_dir / f"{safe_id}.md").resolve()
+        if knowledge_dir not in target.parents and target.parent != knowledge_dir:
+            raise HTTPException(status_code=400, detail="resolved path escapes knowledge_dir")
+        target.write_text(req.markdown, encoding="utf-8")
+        return target
+    if req.path:
+        candidate = Path(req.path)
+        target = candidate if candidate.is_absolute() else (knowledge_dir / candidate)
+        target = target.resolve()
+        if knowledge_dir not in target.parents and target.parent != knowledge_dir:
+            raise HTTPException(status_code=400, detail="path escapes knowledge_dir")
+        if not target.exists():
+            raise HTTPException(status_code=404, detail=f"file not found: {target}")
+        return target
+    raise HTTPException(status_code=400, detail="one of 'markdown' or 'path' is required")
+
+
+@app.post("/api/ingest/memo", response_model=MemoIngestResponse)
+async def post_ingest_memo(
+    req: MemoIngestRequest,
+    x_axis_token: str | None = Header(default=None, alias="X-Axis-Token"),
+) -> MemoIngestResponse:
+    """Live ingest one memo. Same X-Axis-Token gate as /api/ingest.
+
+    Two modes:
+      * ``markdown``: full YAML+md text; written to ``<knowledge_dir>/<id>.md``
+        (overwrites if it exists — re-ingest is upsert).
+      * ``path``: relative or absolute path under ``knowledge_dir`` of an
+        already-saved file.
+
+    Either way, the file is loaded, chunked, embedded and merged into the
+    running ChromaDB collection — and the KnowledgeGraph is rebuilt — so
+    ``POST /api/search`` and ``GET /api/graph`` show the new memo
+    immediately, with no ``build_index --rebuild`` and no backend restart.
+    """
+    _require_ingest_token(x_axis_token)
+    if not req.markdown and not req.path:
+        raise HTTPException(
+            status_code=400, detail="one of 'markdown' or 'path' is required"
+        )
+
+    knowledge_dir = Path(_state.get("knowledge_dir", "./examples/knowledge"))
+    target = _resolve_memo_path(req, knowledge_dir)
+    try:
+        result = _live_ingest_path(target)
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"ingest failed: {e}") from e
+    _rebuild_graph_state()
+    return MemoIngestResponse(
+        doc_id=result.doc_id,
+        saved_path=str(target),
+        parents=result.parents,
+        children=result.children,
+        deleted_existing=result.deleted_existing,
+        indexed=True,
+    )
 
 
 @app.post("/api/search", response_model=SearchResponse)
