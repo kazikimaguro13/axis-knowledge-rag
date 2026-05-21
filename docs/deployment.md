@@ -117,6 +117,41 @@ docker run --rm \
 
 ---
 
+## Personal Knowledge Directory (spec_054)
+
+ローカルで実運用するときは、自分のメモを **リポジトリ外** に置いて
+`AXIS_KNOWLEDGE_DIR` で API / indexer を切り替えるのが安全です。
+そうすると `examples/knowledge/` (OSS demo) や
+`backend/tests/fixtures/knowledge/` (テスト fixture) はそのまま残り、
+個人ノートを差し替えても `git pull` も `pytest` も壊れません。
+
+```bash
+# 1. 自分のメモ置き場を作る (repo の外)
+mkdir -p ~/axis-knowledge
+# 2. YAML frontmatter 付き Markdown を放り込む
+#    (frontmatter スキーマは docs/spec-v2.md を参照)
+# 3. env で指すだけ — config.yml を編集する必要なし
+export AXIS_KNOWLEDGE_DIR=~/axis-knowledge
+
+# 4. index を構築 (Embedding API キーが必要)
+PYTHONPATH=. python3 -m scripts.build_index "$AXIS_KNOWLEDGE_DIR" --rebuild
+
+# 5. API を起動 — graph も AXIS_KNOWLEDGE_DIR を読む
+PYTHONPATH=. python3 -m uvicorn backend.src.api:app
+```
+
+`AXIS_KNOWLEDGE_DIR` 未設定時は `config.yml` の `graph.knowledge_dir`
+(default `./examples/knowledge`) が使われるので、デモ用途は何もしなく
+ても動きます。詳しい優先順位は [docs/configuration.md](configuration.md#knowledge-directory-layout-spec_054) を参照。
+
+> **3 つの役割を混ぜない**: demo (`examples/knowledge/`) / test fixture
+> (`backend/tests/fixtures/knowledge/`) / 個人ノート (`~/axis-knowledge/`)
+> はそれぞれ別ディレクトリで管理します。混ぜると 2026-05-21 の事故
+> (demo data を退避したら CI smoke の neighbors テストが落ちた) を
+> 再現します。
+
+---
+
 ## Security — `/api/ingest` token (spec_051)
 
 `POST /api/ingest` (browser-extension の入口) は **デフォルトで無認証**です。

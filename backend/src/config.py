@@ -295,6 +295,19 @@ def load_app_config(path: Path | None = None) -> AppConfig:
     override = os.environ.get("EVAL_OVERRIDE_FLAG", "").strip()
     if override:
         cfg = _apply_override_flags(cfg, override)
+
+    # spec_054: `AXIS_KNOWLEDGE_DIR` overrides `graph.knowledge_dir` so users
+    # can point at a personal corpus (`~/axis-knowledge/` etc.) without editing
+    # the repo's `config.yml`. The test suite uses the same hook to redirect
+    # at `backend/tests/fixtures/knowledge/`.
+    axis_knowledge_dir = os.environ.get("AXIS_KNOWLEDGE_DIR", "").strip()
+    if axis_knowledge_dir:
+        import dataclasses
+
+        cfg = dataclasses.replace(
+            cfg,
+            graph=dataclasses.replace(cfg.graph, knowledge_dir=axis_knowledge_dir),
+        )
     return cfg
 
 

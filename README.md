@@ -47,6 +47,12 @@ docker compose up
 > 初回ビルド時は ChromaDB 関連で 5〜10 分かかる場合あり。  
 > `.env` ファイルが必要 (`cp .env.example .env` でひな形を作成)。  
 > **API キー未設定でも DUMMY モードで UI / 検索動作の確認は可能。**
+>
+> **個人のメモを使うとき** (spec_054): `export AXIS_KNOWLEDGE_DIR=~/axis-knowledge`
+> を設定すると、その dir をナレッジソースとして起動します。`examples/knowledge/`
+> (OSS demo) と `backend/tests/fixtures/knowledge/` (テスト fixture) はそのまま
+> 残るので、`git pull` / `pytest` が壊れません。詳細は
+> [`docs/configuration.md`](docs/configuration.md#knowledge-directory-layout-spec_054)。
 
 ---
 
