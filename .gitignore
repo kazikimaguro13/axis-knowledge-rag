@@ -81,3 +81,7 @@ Thumbs.db
 _ai_workspace/logs/
 _ai_workspace/RESUME_*.md
 _ai_workspace/*_nohup.out
+
+# personal knowledge notes (not part of the demo corpus)
+examples/knowledge/note_*.md
+examples/knowledge_demo/
