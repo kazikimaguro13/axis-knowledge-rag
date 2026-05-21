@@ -149,7 +149,7 @@ def test_get_graph_filter_by_category() -> None:
 
 
 def test_get_neighbors_known_doc() -> None:
-    """doc_001 in examples/knowledge is referenced by doc_002 and doc_004."""
+    """doc_001 in the test fixture corpus is referenced by doc_002 and doc_004."""
     with TestClient(app) as client:
         resp = client.get("/api/graph/doc_001/neighbors?hop=1&max_neighbors=10")
         assert resp.status_code == 200
@@ -208,8 +208,8 @@ def test_neighbors_direction_both_default() -> None:
 
 
 def test_post_ingest_returns_saved_path(tmp_path) -> None:
-    # Route the writer at a tmp dir so the suite never touches the real
-    # ``examples/knowledge/`` corpus.
+    # Route the writer at a tmp dir so the suite never touches the user's real
+    # knowledge corpus (the fixture dir is also off-limits for write-back).
     from backend.src import api as api_module
 
     with TestClient(app) as client:
