@@ -213,6 +213,48 @@ generation:
 
 ---
 
+## `axes.category` (spec_056)
+
+`config.yml` defines `category` as a closed enum used by `/api/axes` to
+populate the Web UI axis-filter dropdown.  v0.9.4 extends the historical
+7 personal-note values (`就活`, `業務`, `学習`, `議事録`, `ToDo`, `メモ`,
+`技術記事`) with 4 dev-history values (`spec`, `result`, `adr`,
+`changelog`) so the project's own spec lifecycle memos (under
+`~/axis-knowledge/`) show up in the filter dropdown alongside personal
+notes.
+
+`loader.py` does **not** strictly validate enum values — memos with any
+string `category` still load + index — so this list is purely a UI
+affordance.  Add your own categories here when you want them surfaced
+in `/api/axes` and the frontend filters.
+
+---
+
+## Live ingest (spec_056)
+
+Two endpoints feed the running ChromaDB collection without a
+`build_index --rebuild` and without restarting the backend:
+
+| Endpoint | Body | Notes |
+|----------|------|-------|
+| `POST /api/ingest/memo` | `{"markdown": "<full YAML+md>"}` or `{"path": "<rel path>"}` | `markdown` writes `<knowledge_dir>/<frontmatter.id>.md` (overwrites — re-ingest is upsert).  `path` mode ingests an already-saved file inside `knowledge_dir`.  Same `X-Axis-Token` gate as `/api/ingest`. |
+| `POST /api/ingest` | browser-extension capture payload | After saving the page, the same live-ingest path runs.  `indexed` / `parents` / `children` are reported in the response. |
+
+Both endpoints rebuild the in-memory `KnowledgeGraph` after a successful
+add, so `/api/graph` and `axis_neighbors` see the new memo immediately.
+Re-ingest of the same `doc_id` is upsert — chunks for the old body are
+removed first via `VectorStore.delete_doc`, so editing a memo and
+re-posting just replaces it without duplicating rows.
+
+The MCP tool `axis_ingest_memo` POSTs its rendered markdown to
+`/api/ingest/memo` by default (`live_ingest=true`).  Set `backend_url`
+or env `AXIS_BACKEND_URL` to override the default
+`http://127.0.0.1:8000`.  When the backend is unreachable, the tool
+falls back to returning the rendered markdown only (`indexed=false`),
+so the user can save it manually + run `build_index --rebuild` later.
+
+---
+
 ## Environment variables
 
 ### `EVAL_OVERRIDE_FLAG` (spec_042)

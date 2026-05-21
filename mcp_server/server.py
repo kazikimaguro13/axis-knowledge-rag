@@ -442,11 +442,42 @@ async def axis_list_documents(params: ListDocumentsInput) -> str:
 # ============================================================================
 # Tool 6: axis_ingest_memo
 # ============================================================================
+_DEFAULT_BACKEND_URL = "http://127.0.0.1:8000"
+
+
+def _live_ingest_via_backend(markdown: str, backend_url: str) -> dict | None:
+    """POST the rendered memo to the backend's /api/ingest/memo (spec_056).
+
+    Returns the parsed response dict on success, ``None`` on any failure
+    (connection refused, timeout, non-2xx, malformed body). Backend may
+    require ``X-Axis-Token``; we forward ``AXIS_INGEST_TOKEN`` from env
+    so the MCP and backend processes can share the same secret.
+    """
+    import os
+    import urllib.error
+    import urllib.request
+
+    url = backend_url.rstrip("/") + "/api/ingest/memo"
+    payload = json.dumps({"markdown": markdown}).encode("utf-8")
+    headers = {"Content-Type": "application/json"}
+    token = (os.environ.get("AXIS_INGEST_TOKEN", "") or "").strip()
+    if token:
+        headers["X-Axis-Token"] = token
+    req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310 — local backend only
+            body = resp.read().decode("utf-8")
+            return json.loads(body)
+    except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as e:
+        logger.info("live ingest backend call failed (%s) — falling back to markdown-only", e)
+        return None
+
+
 @mcp.tool(
     name="axis_ingest_memo",
     annotations=ToolAnnotations(
-        title="Convert raw memo to YAML-frontmatter Markdown",
-        readOnlyHint=True,  # Does not modify files; just returns the converted content
+        title="Convert raw memo to YAML-frontmatter Markdown and live-ingest",
+        readOnlyHint=False,  # spec_056: now writes to disk + index when live ingest succeeds
         destructiveHint=False,
         idempotentHint=False,  # Claude API is nondeterministic
         openWorldHint=True,  # Calls Anthropic API (external)
@@ -460,10 +491,18 @@ async def axis_ingest_memo(params: IngestInput) -> str:
     Returns rendered Markdown by default; pass `response_format='json'` for the
     structured `IngestResult` payload plus the rendered Markdown.
 
+    spec_056: ``live_ingest=true`` (default) POSTs the rendered markdown to the
+    running backend's ``/api/ingest/memo`` so the memo becomes searchable + visible
+    in /api/graph without a backend restart. If the backend is not reachable,
+    the tool still returns the rendered markdown (``indexed=false``) so callers
+    can save it manually + run ``build_index --rebuild`` later.
+
     DUMMY mode (no `ANTHROPIC_API_KEY`) returns a deterministic mock — useful
     for plumbing tests but not for actual ingestion.
     """
     try:
+        import os
+
         from backend.src.ingester import Ingester, render_markdown
         from backend.src.ingester_schemas import IngestOptions
 
@@ -476,19 +515,33 @@ async def axis_ingest_memo(params: IngestInput) -> str:
         result = ingester.ingest(params.raw_text, opts)
         md = render_markdown(result)
 
+        live_resp: dict | None = None
+        if params.live_ingest:
+            backend_url = (
+                params.backend_url
+                or os.environ.get("AXIS_BACKEND_URL", "").strip()
+                or _DEFAULT_BACKEND_URL
+            )
+            live_resp = _live_ingest_via_backend(md, backend_url)
+
         if params.response_format == ResponseFormat.JSON:
-            return json.dumps(
-                {
-                    "id": result.id,
-                    "title": result.title,
-                    "axes": result.axes,
-                    "tags": result.tags,
-                    "refs": result.refs,
-                    "rendered_md": md,
-                    "is_dummy": ingester.is_dummy,
-                },
-                ensure_ascii=False,
-                indent=2,
+            payload = {
+                "id": result.id,
+                "title": result.title,
+                "axes": result.axes,
+                "tags": result.tags,
+                "refs": result.refs,
+                "rendered_md": md,
+                "is_dummy": ingester.is_dummy,
+                "indexed": bool(live_resp and live_resp.get("indexed")),
+            }
+            if live_resp:
+                payload["live_ingest"] = live_resp
+            return json.dumps(payload, ensure_ascii=False, indent=2)
+        if live_resp and live_resp.get("indexed"):
+            return (
+                f"<!-- indexed: {live_resp.get('parents', 0)} parents / "
+                f"{live_resp.get('children', 0)} children -->\n{md}"
             )
         return md
     except Exception as e:

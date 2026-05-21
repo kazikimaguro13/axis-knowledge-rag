@@ -239,6 +239,60 @@ class VectorStore:
         self._parents = {}
         self._parent_storage.clear()
 
+    def delete_doc(self, doc_id: str) -> int:
+        """Remove every chunk + parent belonging to ``doc_id``. Returns deleted child count.
+
+        Used by the live-ingest path (spec_056) to make memo re-ingest behave
+        as upsert: re-chunking with the same ``doc_id`` produces deterministic
+        ``parent_id`` / ``child_id`` (v0.9.3, spec_055), so a plain ``add``
+        would trip Chroma's DuplicateIDError. We drop both sides — children
+        from the Chroma collection (matched on the ``doc_id`` metadata) and
+        parents from the SQLite sidecar — so the next ``add_chunks`` is a
+        clean insert. No-op on unknown ids; safe to call before every add.
+        """
+        deleted = 0
+        try:
+            existing = self._collection.get(where={"doc_id": doc_id}, include=[])
+            ids = list(existing.get("ids") or [])
+            if ids:
+                self._collection.delete(ids=ids)
+                deleted = len(ids)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("delete_doc: chroma delete failed for %s: %s", doc_id, e)
+        try:
+            removed_parents = self._parent_storage_delete_by_doc(doc_id)
+            if removed_parents:
+                self._parents = {
+                    pid: p for pid, p in self._parents.items() if p.doc_id != doc_id
+                }
+        except Exception as e:  # noqa: BLE001
+            logger.warning("delete_doc: parent storage delete failed for %s: %s", doc_id, e)
+        return deleted
+
+    def _parent_storage_delete_by_doc(self, doc_id: str) -> int:
+        """Best-effort delete of parents owned by ``doc_id``.
+
+        Sqlite backend has a doc_id index — issue a direct DELETE. JSON
+        backend has no index but the dict is small enough to filter
+        in-process. Returns the number of parents removed.
+        """
+        store = self._parent_storage
+        if isinstance(store, SqliteParentStorage):
+            conn = store._conn  # noqa: SLF001 — single-package boundary
+            cur = conn.execute("DELETE FROM parents WHERE doc_id = ?", (doc_id,))
+            conn.commit()
+            return int(cur.rowcount or 0)
+        # Fallback for JsonParentStorage / future backends: list_all + filter
+        if hasattr(store, "list_all"):
+            all_parents = store.list_all()  # type: ignore[attr-defined]
+            to_keep = [p for p in all_parents if p.doc_id != doc_id]
+            removed = len(all_parents) - len(to_keep)
+            if removed:
+                store.clear()
+                store.upsert_many(to_keep)
+            return removed
+        return 0
+
     # -----------------------------------------------------------------
     # spec_031 / spec_037: parent-document retrieval
     # -----------------------------------------------------------------
