@@ -95,6 +95,10 @@ graph:
   default_hop: 1
   max_neighbors_per_query: 20
   expand_on_search: false
+  # spec_054: `./examples/knowledge` is the OSS demo corpus; for personal use,
+  # keep your notes outside the repo (e.g. `~/axis-knowledge/`) and override
+  # at runtime via the `AXIS_KNOWLEDGE_DIR` env var — this leaves the demo
+  # corpus + test fixtures untouched. See docs/configuration.md.
   knowledge_dir: "./examples/knowledge"
 
 # spec_045: Ollama / Llama.cpp full on-prem backend selection.
