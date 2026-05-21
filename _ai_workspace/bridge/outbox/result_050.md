@@ -1,191 +1,187 @@
-# result_050 — v0.9 全体総合コードレビュー (F1-F5)
+# result_050 — v0.9 全体総合コードレビュー (F1–F5 完成後)
 
-- **Status**: ✅ done (read-only review)
-- **Branch**: `review/v0.9-overall` (checkout 済み) → 結果のみ commit/push
-- **Date**: 2026-05-20
-- **Range**: `v0.8.1..HEAD` = 45 commits, +5343 / -156 行, 64 files
-- **Specs covered**: spec_045 (Ollama) / spec_046 (Browser Ext) / spec_047 (Feedback) / spec_048 (Gap Detect) / spec_049 (Bidirectional refs)
-- **Source modifications**: **0** (touched only result_050.md)
-
----
-
-## 0. 結論 / ヘッドライン
-
-**判定: A−（ES に貼って出せる。ただし HIGH 1 件・MID 3 件を v0.9.x patch で潰すと安心）**
-
-- `pytest`: **419 passed / 2 skipped** (28.2s)
-- `ruff check .`: **All checks passed**
-- `next build`: **緑** (5/5 static pages)
-- `tsc --noEmit`: **緑**（frontend jest は repo に jest config が無く 0/2 suites fail — テストランナー未整備というだけで型/ビルドは OK）
-- 4 つの v0.9 マーキー機能 + spec_049 のミニ拡張、いずれも Protocol+factory パターンで揃っており設計は一貫
-- セキュリティ上の致命傷は無し。ただし「全 endpoint が無認証、CORS が広い、PII 平文保存」が **同時に成立** している点は本番運用時に明示判断が必要
+- **Reviewer**: Claude Code (`dev-b`)
+- **Branch reviewed**: `feat/spec_050-v0.9-final-review` (base = v0.8.1)
+- **Diff scope**: `git log v0.8.1..HEAD` = 73 commits, spec_043 → spec_053
+  - F1 = spec_045 (Ollama), F2 = spec_046 (Browser Ext), F3 = spec_047
+    (Feedback), F4 = spec_048 (Gap Detection), F5 = spec_049 (Bidirectional)
+  - 後続 hotfix: spec_051 (HIGH-1 dim mismatch / MID-1 ingest token / MID-3
+    detect_no_info 偽陽性), spec_052 (Gemini gen backend), spec_053
+    (GraphSidebar 可視化)
+- **Method**: read-only code review — `backend/src/{embedder,rag,api,search,
+  ingest_web,feedback,gap_detection,graph,config,schemas}.py`,
+  `browser-extension/{manifest,popup,background}.{json,js}`,
+  `frontend/src/{lib,components}/*.{ts,tsx}`, `mcp_server/{server,schemas,
+  formatters}.py`, `evaluation/{feedback,gap}_report.py`, tests under
+  `backend/tests/` と `frontend/__tests__/`。**ソース変更 0、commit 0**.
 
 ---
 
-## 1. 各 spec × 4 軸の所見テーブル
+## 1. spec 別 所見テーブル (4 軸: Security / Performance / Correctness / Maintainability)
 
-| spec | security | performance | correctness | maintainability |
-|---|---|---|---|---|
-| **045 Ollama** | 〇 URL は config 経由のみで外部入力なし。`EVAL_OVERRIDE_FLAG` 経由で `embedder.ollama.url` を上書き可能だが env var 起点なので低リスク | △ `embed_batch` が逐次 (Ollama API が単発のみ)。`_probe_dim` が `__init__` で同期ブロック | **▲ HIGH-1**: bge-m3 (1024-dim) ↔ Gemini 既存 index (768-dim) の dim mismatch を起動時に検出していない。さらに `search.py:252 / 368` で axis-only query に `[0.0]*768` ハードコード | 〇 Protocol が clean。`_client = getattr(self._backend, "_client", None)` (rag.py:388) はテスト shim 用ハックで匂う |
-| **046 Browser Ext** | **▲ MID-1**: `/api/ingest` 無認証 + CORS 広め。localhost で動かす前提だが、リモート公開時はファイル書き込みが open。`_slugify` の path traversal は OK (`..` は drop される) | 〇 単発ファイル書きだけ。サイズ制限は Pydantic max_length で実施 | △ `popup.js` は常に `selected_text: null` を送り、選択範囲は `body` に詰めている。spec の selected_text 経路は実質 dead code | △ `_yaml_dump` 自前実装。PyYAML は既に依存。`yaml.safe_dump` に切替えるべき |
-| **047 Feedback** | **▲ MID-2**: `query` を平文保存、無認証 endpoint。PII (名前・社内固有名詞・誤入力) が `~/.axis_feedback.db` に蓄積、retention/TTL なし | 〇 単一接続 + Lock、WAL モード。`evaluation/feedback_report.py` の Python 集計で十分 (~10K 行まで) | 〇 UI は `feedback !== null` で disable、optimistic update + 失敗時 revert。リロードで state 戻るので server 側 idempotency なし (許容) | 〇 Protocol+factory が spec_036 / spec_048 と揃う |
-| **048 Gap Detect** | **▲ MID-3**: `query` が `~/.axis_gap.db` に平文蓄積。no_results/low_score でも記録するので **PII 蓄積面が feedback よりさらに広い** | △ Lock+INSERT+commit が `/api/search`+`/api/answer` の hot path に乗る。実測 ~1ms/req で許容範囲だが、disk growth に上限なし | △ `detect_no_info` の `r"わかりません" / r"不明です"` が広め。「Aの場合はXですが、Bの場合はわかりません」のような部分回答も `llm_no_info` と判定される false positive あり | 〇 search/rag hook は `gap_store is None` で完全 no-op。`gap.enabled=false` は本当にゼロコスト |
-| **049 Bidirectional** | 〇 新しい attack surface なし | △ HTTP `/api/graph/{id}/neighbors` を 2 回呼ぶ (`Promise.all` で並列なので wall-clock は OK だが backend CPU は 2x)。MCP 側は 1 ツール呼び出しで内部 fan-out — **HTTP と MCP で実装方式が非対称** | **▲ LOW-1**: `hop > 1` のとき `direction=both` 1 回と (`direction=out` + `direction=in`) 2 回は等価でない。ADR-030 で言及済み、Sidebar は `hop=1` のみ使うので実害なし | 〇 `format_neighbors_md_bidirectional` と既存 `format_neighbors_md` は別関数。重複は許容範囲 |
+### spec_045 (F1 — Ollama / fully on-prem)
 
----
+| 軸 | 所見 | 評価 |
+| --- | --- | --- |
+| Security | Ollama URL は `OllamaConfig.url` (config.yml 経由、信頼境界内)。`google.generativeai` API key は `settings.gemini_api_key` から取得し log に出さない。`ClaudeBackend.__init__` で API key の log 露出無し。**外部入力からの URL injection 経路は無し**。 | ✅ |
+| Performance | `OllamaEmbedder.__init__` で `_probe_dim()` (1 RTT) が走り、起動時に 1 回だけ。`embed_batch` は逐次 (Ollama embeddings endpoint が単発)。**timeout / retry 設定無し** — Ollama がハングすると FastAPI request も道連れ。ローカル前提なら許容。Anthropic SDK は built-in retry (default 2 回) があるので Claude 側は OK。 | 🟡 |
+| Correctness | Protocol (`Embedder` / `GenerationBackend`) 設計が clean。3 backend (Gemini/Ollama/Dummy × Claude/Gemini/Ollama/Dummy) すべて `make_*()` factory で集約。**HIGH-1 (dim mismatch) は spec_051 で startup fatal にして対処済み** (`api.py` lifespan で `embedder.dim != store.probe_dim()` なら `RuntimeError`)。bge-m3 (1024dim) ⇄ Gemini (768dim) index 再構築 guidance 入りメッセージも親切。`make_generation_backend("auto")` の fallback chain (Claude→Gemini→Dummy) も妥当。 | ✅ |
+| Maintainability | テスト 14 unit + 2 integration (test_embedder.py + test_ollama_backend.py)。`OllamaEmbedder` の import を遅延化 (`try: import ollama`) し optional extras `[ollama]` 化済。`auto` mode が spec_052 で追加された差分も非破壊。**`force_dummy` 互換 shim** が `GeminiEmbedder` に残る — v0.10 で剥がす候補だが現状妥当。 | ✅ |
 
-## 2. 新たに見つけた問題 (priority 付き)
+### spec_046 (F2 — Browser Extension MVP)
 
-### HIGH-1: Embedder 切替時の dim mismatch サイレントクラッシュ
-**場所**: `backend/src/embedder.py:189-191`、`backend/src/search.py:252,368`
+| 軸 | 所見 | 評価 |
+| --- | --- | --- |
+| Security | (a) **CORS regex `^(chrome-extension://.*\|http://localhost(:\d+)?\|http://127\.0\.0\.1(:\d+)?)$` は chrome-extension で wildcard** — 任意の Chrome 拡張から POST 可能。 **spec_051 MID-1 で AXIS_INGEST_TOKEN を opt-in 化** して mitigation 済 (README/deployment.md 注記あり)。(b) **path traversal**: `_slugify()` の `[^\w\s-]` 削除で `.` も dropped するため `"../../etc"` → `etcpasswd` → 単なる slug 化。さらに filename は `web_<timestamp>_<slug>.md` で timestamp prefix 強制 → traversal 不可能。(c) **XSS**: title/body は **markdown ファイルに書き込むだけ**、サーバ側で render しない。downstream で render する場合 (Streamlit/Next.js) は既存 markdown sanitizer に委任。(d) **URL scheme 検証無し** — `IngestRequest.url: str` で `javascript:` や `file://` も受理。frontmatter `url:` / body `source:` に書き込まれるだけなので blast radius は低いが、`HttpUrl` 化が望ましい。 | 🟡 |
+| Performance | popup.js: `MAX_BODY_CHARS = 5000` で head 切り — 妥当。`save_web_page` は 1 file write、I/O はミリ秒オーダー。`_yaml_dump` は自前 1 階層のみ対応の最小実装で軽量。 | ✅ |
+| Correctness | NFKC 正規化 + Python `\w` で Japanese 対応 → `Ｗｅｂ 記事` → `web-記事` (test_slugify_japanese_title で実証)。`selected_text` が body より優先される (test 済)。**同一秒内の 2 回連続 ingest はファイル名衝突 + 上書き**するが UX 上ほぼ起きない。`_yaml_scalar` は YAML reserved indicator / `: ` を quote 対象にしており URL の `:` を区切りと誤解しない設計。8 unit + 2 API integration テストでカバー済。 | ✅ |
+| Maintainability | extension は MV3 + vanilla JS + manifest minimal (権限 `activeTab` / `scripting` / `storage` のみ)。`background.js` は default endpoint seed のみで余計な service worker logic 無し。`browser-extension/README.md` で troubleshooting も整備。 | ✅ |
 
-```python
-# search.py L252 (legacy path)
-embedding = [0.0] * 768
+### spec_047 (F3 — Active Learning Feedback)
 
-# search.py L368 (parent-doc path)
-embedding = [0.0] * 768
-```
+| 軸 | 所見 | 評価 |
+| --- | --- | --- |
+| Security | (a) **PII 蓄積リスク**: `FeedbackRecord.query` を平文で SQLite に保存 (`~/.axis_feedback.db`)。ユーザが query に PII / 機密情報を入力すると永続化。`feedback_report.py` も top queries をそのまま markdown に dump → Slack 貼付時に漏出。**Local-first OSS としては許容範囲だが README に注意書きあるべき** (現状 deployment.md に MID-1 周りの注記はあるが PII 注意は無し)。(b) `POST /api/feedback` に rate limit 無し → spammy POST 攻撃の余地 (CORS で localhost / chrome-extension に限定されているので blast radius は低い)。 | 🟡 |
+| Performance | `SqliteFeedbackStore` は単一 connection + `threading.Lock` + `PRAGMA journal_mode=WAL`。FastAPI worker 数 × Lock contention は ms 未満。`list_recent` で `WHERE timestamp >= ?` + `idx_feedback_ts` index あり、O(log n) で取れる。 | ✅ |
+| Correctness | (a) **2 重送信防止**: ResultCard.tsx / ChatMessage.tsx ともに `disabled={feedback !== null}` で第 2 クリックを block。Optimistic UI で失敗時のみ `prev` (null) に巻き戻し → 再 click 可能。Streamlit 側 (`streamlit_app.py`) は `st.button` の natural rerun + key uniqueness で防いでいる (双方の挙動が異なる点が要注意だが意図的)。(b) Protocol `FeedbackStore` の runtime_checkable 検証あり (test_make_feedback_store_enabled)。(c) feedback 無効時の API 503 路径確認済 (lifespan で `feedback_store=None`、`_require_feedback_store()` が 503 を投げる)。 | ✅ |
+| Maintainability | 12 unit + 3 feedback report + 4 API test。`note` / `session_id` / `doc_id` すべて optional、`rating` は Pydantic で `-1 ≤ rating ≤ 1` 制約。idempotent close() 含めて backend 差し替え (Postgres / Redis) の seam がきれい。 | ✅ |
 
-bge-m3 を Ollama で使うと `OllamaEmbedder.dim == 1024`、既存 Chroma index は Gemini text-embedding-004 (768) で構築されている。
-- ユーザーが `config.yml` で `embedder.backend=ollama` に切り替えても、既存 `.chromadb/` を rebuild しない限り次の query で Chroma が "dimension mismatch" を投げる
-- さらに **axis-only query (`query is None`)** では embedder の dim を見ずに `[0.0] * 768` を直接渡している。bge-m3 index 上で axis-only リスト取得すると常に失敗
+### spec_048 (F4 — Knowledge Gap Detection)
 
-**推奨修正** (v0.9.1 patch):
-1. `lifespan` 起動時に `store._collection.metadata` か最初の query で得た distances 長と `embedder.dim` を比較、不一致なら明示エラー + 「`scripts/build_index.py --rebuild`」を案内
-2. `search.py` の `[0.0] * 768` を `[0.0] * self._embedder.dim` に変更（Embedder Protocol に既に `dim` プロパティがある）
+| 軸 | 所見 | 評価 |
+| --- | --- | --- |
+| Security | feedback と同様、`query` を平文で `~/.axis_gap.db` に保存。**PII risk は feedback と同等**。gap_report.py の "Top unsatisfied queries" がそのまま markdown 出力されるため Slack 共有時注意。 | 🟡 |
+| Performance | (a) **search path overhead**: `_record_gap()` は results.empty / top_score 比較のみで O(1)。disabled 時は `self._gap_store is None` で即 return — **zero hot-path cost を実現**。(b) **rag path overhead**: `_record_llm_gap()` は regex 1 回 (`_NO_INFO_RE.search`) — 数十パターン union だが alternation 数本なので ms 未満。(c) **disk growth 抑制無し** — TTL / rotation / vacuum 設定無し、`SqliteGapStore` は monotonic 増加。**v0.10 で 30/90 日 cleanup ジョブ追加が望ましい** (feedback も同じ問題)。 | 🟡 |
+| Correctness | (a) **detect_no_info 偽陽性率**: spec_051 MID-3 で `わかりません` / `不明です` を `(?:。\s*\Z\|\Z)` 終端アンカー化 → 「A は X ですが、B はわかりません、しかし C は Y です。」が False に。test_detect_no_info_partial_answer_is_false で regression guard 済。真陽性 (「結論はわかりません。」) も維持を test で実証。English/Japanese 両対応。**spec で要求された "偽陽性をなるべく抑える" 設計目標は達成**。(b) **search / rag hook が既存 logic を破壊しない**: `_record_gap` / `_record_llm_gap` は **post-hoc + try/except + log warning** — 例外で本来の search/RAG path を止めない。axis-only query (query=None) は skip。(c) gap store と search engine / RAG pipeline で **同一 store instance を共有**するため 1 件の query が `no_results` (search) と `llm_no_info` (rag) で 2 record になることがあるが、reason で識別可能で意図通り。 | ✅ |
+| Maintainability | 11 + 3 + endpoint test。Protocol `GapStore` + factory `make_gap_store(cfg)` → None で disabled、503 / no-op の対称性が feedback と完全に揃っている。GapConfig.low_score_threshold (default 0.35) は config.yml で tunable。 | ✅ |
 
-### MID-1: `/api/ingest` 無認証 + CORS chrome-extension://\* + localhost wildcard
-**場所**: `backend/src/api.py:206-212`、`backend/src/api.py:248-273`
+### spec_049 (F5 — Bidirectional Refs)
 
-- 任意の Chrome 拡張・任意の `http://localhost:*` タブが `/api/ingest` を叩いてファイル書き込み可能
-- README / docs/deployment.md には「localhost のみで動かす想定」とあるが、`uvicorn ... --host 0.0.0.0` で外に出すと open file write 状態
-- spec_046 ADR で「ローカル専用」と明言しているなら `--host 127.0.0.1` を **デフォルトで強制** するか、ingest endpoint だけ origin 制限 / ヘッダ secret を要求するのが安全
-
-**推奨修正**: docker-compose / `make` 経由は既に localhost bind。`README` に「`/api/ingest` は無認証なので絶対に外部公開するな」を太字で書く。または Token 1 個を `INGEST_TOKEN` env で要求する 5 行追加。
-
-### MID-2: PII の長期蓄積 (feedback + gap)
-**場所**: `backend/src/feedback.py:91-112`、`backend/src/gap_detection.py:95-122`
-
-- `query` を平文 SQLite に **TTL なし** で書き込む
-- gap 側は no_results / low_score の query も全部記録 → "誤入力で社内固有名詞を打った" 系のログが永遠に残る
-- GDPR / 社内コンプラ通せばグレー〜赤
-
-**推奨修正**:
-- `feedback.db_retention_days` / `gap.db_retention_days` を `FeedbackConfig` / `GapConfig` に足す (default 90)
-- `list_recent()` の sibling として `purge_older_than(days)` を Protocol に追加し、報告 endpoint or daily job で叩く
-- `make feedback-report` / `make gap-report` に purge オプション
-
-### MID-3: `detect_no_info` の false positive (部分回答も "no_info" 判定)
-**場所**: `backend/src/gap_detection.py:169-184`
-
-`r"わかりません"` / `r"不明です"` が回答全文に対する `re.search` なので、「A は X です [1]。B についてはわかりません」が `llm_no_info` 判定される。test_gap_detection.py の negative case は全文が "ちゃんとした回答" のものしか見ていない。
-
-**推奨修正**:
-- patterns を `(?:^|\n)\s*(?:わかりません|不明です)\s*[。\.！!？?]?\s*$` のように文末・独立文に制限
-- もしくは `cited_ids` が 0 件のときだけ `detect_no_info` を回す (cited あればモデルは何か答えている)
-
-### LOW-1: `hop > 1` の bidirectional 不等価
-**場所**: `frontend/src/lib/graphClient.ts:87-102`、`backend/src/graph.py:105-141`
-
-(direction=out, hop=2) ∪ (direction=in, hop=2) ≠ (direction=both, hop=2) のケースがある (A→B, C←D で A 起点 hop=2)。
-- ADR-030 で言及済み、Sidebar は `hop=1` 固定なので実害ゼロ
-- ただし将来 hop を可変にすると「forwardlinks に出てこないが both では出るノード」が消える
-
-**推奨修正**: `fetchNeighborsBidirectional(docId, hop, max_neighbors)` のシグネチャに hop を残すなら、JSDoc で「hop>1 は近似」と明示。または `bidirectional=true` の単一 endpoint を `/api/graph/{id}/neighbors` に追加 (MCP 側に既に同名フラグあり、対称性 ↑)。
+| 軸 | 所見 | 評価 |
+| --- | --- | --- |
+| Security | 取得 only / 既存 graph cache を read。新規攻撃面無し。`direction` パラメタは API 側 (`pattern="^(in\|out\|both)$"`) で enum 検証済。 | ✅ |
+| Performance | (a) **API 2x call cost**: `fetchNeighborsBidirectional` で `Promise.all([out, in])` 並列実行 — wall-clock は 1 call と同等。グラフは startup 時に in-memory 構築済 (`build_default_graph`)、各 endpoint hit は BFS (`neighbors_within_hop`) で O(hop × deg) — 数 ms 未満。(b) lifespan で graph 構築を `loop.run_in_executor` に逃がしているので大規模 corpus でも liveness probe を block しない (spec_042 LOW #5 改修)。 | ✅ |
+| Correctness | (a) **forwardlinks / backlinks 表示順**: BFS visit 順 (`networkx.successors` / `predecessors` の挿入順) — 安定だが「title 順」「in_degree 順」等の意味的ソート無し。hop=1 で max_neighbors=20 のフロントエンド固定値なら問題小さい。(b) **MCP 後方互換**: `NeighborsInput.bidirectional: bool = Field(default=False)` で従来 caller は変更不要。`bidirectional=True` 時は `direction` を ignore して `out`+`in` 両 fetch → `format_neighbors_md_bidirectional` で別 section 出力。(c) HTTP API の `direction` validation (`pattern="^(in\|out\|both)$"`) と MCP の `direction: str` (validation 無し) で **整合性が不完全** — MCP 側で不正値は `_collect_neighbors` の `ValueError` 経由で error response に落ちるので破壊的ではない、minor。(d) frontend `GraphSidebar.tsx` の `useEffect` cleanup (`cancelled = true`) で race-condition 対策あり。(e) 独立ノード (`forwardlinks=[] && backlinks=[]`) で「独立ノードです」表示 → 良い UX。 | ✅ |
+| Maintainability | 6 test (3 API direction + 3 GraphSidebar render)。`formatters.py` で markdown / json の 4 variants (single×md/json + bidirectional×md/json) を別関数で分離 — 読みやすい。`_DIRECTION_HEADER` map で header 文字列を一元化。 | ✅ |
 
 ---
 
-## 3. ポジティブ評価 (褒め)
+## 2. 全体としての一貫性所見
 
-1. **Protocol+factory パターンの徹底** — Embedder / GenerationBackend / FeedbackStore / GapStore / ParentStorage / ConversationStore、6 つの "差し替え可能な依存" が同じ設計で揃った。`make_xxx(cfg)` で disabled 時に `None` を返し、call site で if-skip するだけというのも一貫
-2. **disabled=zero-cost** — gap も feedback も `enabled=false` で `make_xxx_store` が `None` を返し、search/rag/api 側はそれを見て丸ごと no-op。"機能をオフにしたら本当に消える" は実装上珍しいほど綺麗
-3. **MCP `axis_neighbors` の後方互換** — `bidirectional: bool = False` default で旧 caller は完全に同じ shape を見る。spec_049 で API を変えるのではなく拡張する判断が正しい
-4. **ChatMessage.tsx の二重送信防止 + optimistic UI + 失敗時 revert** — `disabled={feedback !== null}` でクリック後即 disable、API 失敗時は state を元に戻す。クライアント 100 行に詰め込まれた UX 配慮が良い
-5. **Ollama optional 化** — `pip install -e ".[ollama]"` 専用 extras + `docker compose --profile ollama` で必須化を避け、依存爆発を抑えた。テストも `pytest.importorskip + AXIS_OLLAMA_INTEGRATION env` でガード
+### 2-1. 4 つの新規 SQLite (.axis_chat / .axis_feedback / .axis_gap / parents.db) の整理
 
----
+- 現状: `~/.axis_chat.db` (spec_036), `~/.axis_feedback.db` (spec_047),
+  `~/.axis_gap.db` (spec_048), `<chroma_db_path>/parents.db` (spec_037).
+  前 3 つは home dir 直下に散在、parents.db は chroma path 配下。
+- **共通 Protocol 抽出 (CommonStore base) の余地**: `FeedbackStore` /
+  `GapStore` は `record()` / `list_recent()` / `count()` / `close()` と
+  shape が完全一致。`ConversationStore` は append / get_history で別、
+  `ParentStorage` は get / upsert で別。**feedback と gap だけは 1 つの
+  generic `EventStore[T]` Protocol に統合できる** (record(event) / list_recent
+  → list[T] / close)。ただし統合の利得は小 (各 ~150 行)、現状の重複は
+  読みやすさを上回らないので **v0.10 で必要になったらやればいい**。
+- **ファイル配置の整理 (推奨、優先度低)**: `~/.axis/{chat,feedback,gap}.db`
+  → 1 つのサブディレクトリに集約すると user の `ls ~ | grep axis` が綺麗
+  になる。後方互換のため env var (`AXIS_DATA_DIR`) ベースの opt-in 移行
+  にすれば破壊しない。
+- **dim mismatch 検出は HIGH-1 で対処済**ながら、SQLite 同士の整合は無
+  検証 (例: feedback store と gap store の query 重複検知など)。現状は
+  まだ要らない。
 
-## 4. 全体としての一貫性
+### 2-2. v0.9.0 リリース可能か
 
-### 4 つの SQLite (.axis_chat / .axis_feedback / .axis_gap / parents.db) の整理
+- **判定: A 判定 = ES (Engineer Survey) / portfolio に貼れる**。
+- 根拠:
+  1. F1–F5 すべてが Protocol-based でテスト網羅。  
+  2. spec_051 で HIGH-1 (dim mismatch) / MID-1 (ingest auth) / MID-3
+     (regex 偽陽性) を v0.9.0 タグ前に潰し、ADR-031 / ADR-032 / CHANGELOG
+     も追従済。  
+  3. 後方互換性 100% — `/api/graph/.../neighbors` の direction 省略
+     時は `both` で旧動作、MCP `bidirectional` 既定 False で旧動作、
+     `EmbedderConfig.backend` 既定 `"gemini"`、`GenerationConfig.backend`
+     既定 `"auto"` で v0.8.1 動作を再現。  
+  4. 失敗系の graceful fallback — Ollama 接続失敗 / Gemini key 欠落 /
+     Anthropic key 欠落のいずれも startup を止めず DUMMY に落ちる。  
+  5. PII / disk growth は **OSS local-first** という positioning の中では
+     軽微 (Wiki / TODO に v0.10 候補として明記すればよい)。
+- リリース blocker は無し。
 
-|ファイル|spec|backend Lock|WAL|デフォパス|Protocol|
-|---|---|---|---|---|---|
-|`.axis_chat.db`|036|あり|あり|`~/.axis_chat.db`|`ConversationStore`|
-|`.axis_feedback.db`|047|あり|あり|`~/.axis_feedback.db`|`FeedbackStore`|
-|`.axis_gap.db`|048|あり|あり|`~/.axis_gap.db`|`GapStore`|
-|`parents.db`|037|**なし**|あり|`<chroma_dir>/parents.db`|`ParentStorage`|
+### 2-3. 新たに見つけた問題 (priority 付き、0–5 件)
 
-**観察**:
-- 4 つすべてに `__init__` で `expanduser → mkdir → sqlite3.connect(check_same_thread=False) → executescript(SCHEMA) → PRAGMA journal_mode=WAL → commit → Lock()` というほぼ同じ 20 行が **コピペで 4 回** 書かれている
-- `parent_storage.py` だけ Lock を持っていない。読み主体 + lifespan 起動時に一度ロードするため実害は無いが、設計的には不揃い
+| # | priority | 領域 | 問題 | 推奨アクション |
+| --- | --- | --- | --- | --- |
+| 1 | **MID** | spec_046 / schemas.py | `IngestRequest.url: str` が scheme 検証無し。`javascript:` や `file://` URL を frontmatter `url:` / body `source:` 行に書き込み可能。 | `pydantic.HttpUrl` に変更、または `re.match(r"^https?://", url)` validator 追加。`AXIS_INGEST_TOKEN` 未設定時は警告 log。 |
+| 2 | **LOW** | spec_047 / spec_048 | `.axis_feedback.db` / `.axis_gap.db` に query が平文蓄積、永久成長。 | (a) README / deployment.md に PII 注意書き追加。(b) v0.10 で `FeedbackConfig.retention_days` / `GapConfig.retention_days` + housekeeping ジョブ追加。 |
+| 3 | **LOW** | spec_045 / rag.py + embedder.py | `OllamaBackend.generate` / `OllamaEmbedder.embed` に explicit timeout 無し。 | `ollama.Client(host=url, timeout=30)` 等で per-request タイムアウトを設定。FastAPI request hang を防ぐ。 |
+| 4 | **LOW** | spec_049 / mcp_server/schemas.py | MCP `NeighborsInput.direction: str` は pydantic Field validation 無し (HTTP API は `pattern` あり)。不正値は `KnowledgeGraph._collect_neighbors` の `ValueError` 経由でエラー応答に落ちるが整合性悪い。 | `direction: Literal["in", "out", "both"]` 化 (HTTP 側と揃える)。 |
+| 5 | **LOW** | spec_046 / api.py CORS | `chrome-extension://.*` は任意の extension に open。`AXIS_INGEST_TOKEN` で mitigation はあるが default off。 | (a) README 注記済を維持。(b) 将来 `AXIS_INGEST_TOKEN` を default-on にし、unset 時 startup warning を出す案を v0.10 で検討。 |
 
-**推奨**: `backend/src/_sqlite_base.py` に
-```python
-class _SqliteStoreBase:
-    SCHEMA: str = ""
-    def __init__(self, db_path: str | Path) -> None:
-        ... # 共通プレリュード
-```
-を作って 4 store が継承する。ただし **これは v0.10 で良い** (現状動いている分には急がない)。
+**HIGH なし**。MID 1 件、LOW 4 件のみで、いずれもリリース blocker ではない。
 
-### 共通 Store Protocol を見直すべきか
+### 2-4. ポジティブ評価 (0–5 件)
 
-→ **NO**。それぞれの `record / get / list_recent` の引数が違いすぎて、共通インターフェースに無理に押し込むメリットが少ない。Protocol を **個別に保ったまま**、`__init__` boilerplate だけ共通化するのが筋。
-
-### v0.9 として一貫していない点
-
-1. **bidirectional の実装方式**: MCP は 1 ツール呼び出しで内部 fan-out、HTTP は 2 callの fetch。`/api/graph/{id}/neighbors?bidirectional=true` も足してしまったほうがクライアント実装が簡潔
-2. **PII retention**: feedback / gap だけ無制限、chat (spec_036) は `ttl_seconds=86400`。retention の方針を `~/.axis_*.db` 全体で揃えるべき
-3. **DB 配置**: 3 つは `~/.axis_*.db`、parents.db は chroma_dir 配下。後者は parent_storage が "chroma の sidecar" 意識なので妥当だが、ドキュメント / 運用面で混乱しやすい (`make backup-data` のような script を書くなら全部まとめたい)
-
----
-
-## 5. v0.9.0 リリース可否
-
-**A− (= ES 貼り付けは可、ただし v0.9.1 patch を 1-2 週で出す前提)**
-
-ES に貼って出せる根拠:
-- 全テスト緑 (419/419)、ruff・tsc・next build いずれも warning なし
-- spec_041 → spec_044 のレビュー指摘は v0.8.1 で全て解消済み (今回のスコープ外だが念のため diff 確認: `lifespan` の `run_in_executor`、`get_many` の chunking、`sessions.last_access` index、いずれも残っている)
-- 5 機能とも optional / disabled に倒せる設計で、Day-1 でユーザーが何か破壊する余地が少ない
-
-ES に貼る前にやっておきたい (v0.9.1 patch 候補):
-1. **HIGH-1** dim mismatch 検出 + `[0.0] * self._embedder.dim` 修正 — 3〜5 行
-2. **MID-3** `detect_no_info` の false positive 引き締め — pattern 修正 + テスト追加で 10 行
-3. **README** に「`/api/ingest` 無認証、localhost only」の警告 — docs 1 段落
-
-優先度低 (v0.10 でよい):
-- **MID-1** ingest token 認証
-- **MID-2** retention 機構
-- **LOW-1** hop>1 bidirectional 厳密化
-- 4 SQLite store の共通 base
-- HTTP `/api/graph/.../neighbors?bidirectional=true` の追加
-
----
-
-## 6. v0.10 候補
-
-1. **Auth レイヤー (横串)** — `/api/ingest` だけでなく `/api/feedback`、`/api/answer` も含めて、`Authorization: Bearer <token>` を任意で受け付ける middleware。env `AXIS_API_TOKEN` が設定されたときだけ有効。リモート公開ユースケース対応
-2. **PII retention** — feedback / gap に共通 `purge_older_than(days)` を生やし、daily cron / Makefile target で叩く
-3. **Auto-ingest from gap** — gap_report の top query を Browser Extension + LLM で frontmatter 候補化して自動 propose (ADR-029 Alternatives に既に書いてある)
-4. **Ollama batch API** — Ollama 0.5 から `/api/embed` が batch 対応。`embed_batch` の逐次ループを 1 リクエストに集約
-5. **共通 SqliteStoreBase** — 4 store の `__init__` boilerplate 統一
-6. **`/api/graph/.../neighbors?bidirectional=true`** — HTTP と MCP の対称化、フロント往復 1 回化
-7. **Active learning loop の "学習" 部分** — spec_047 で logging までは出来たが、`bm25_weight` や `time_decay.weight` を feedback の net score で自動チューニングする箱物
-8. **Telemetry/ tracing** — 4 store 統合で運用ログ (top10 latency, error rate) の dashboard
+1. **Protocol-first 設計の徹底** — F1 (Embedder / GenerationBackend), F3
+   (FeedbackStore), F4 (GapStore) すべてが `Protocol + runtime_checkable +
+   make_*(cfg) factory + Sqlite implementation + Dummy/None fallback` の
+   同一テンプレートで実装され、backend を差し替える seam が一貫している。
+   将来 Postgres / Redis 実装を追加するときに迷う場所が無い。
+2. **失敗時の graceful degradation が網羅的** — Ollama import 失敗 →
+   DummyEmbedder、Gemini key 欠落 → DummyGenerationBackend、parents.json
+   欠落 → file-level fallback、graph build 失敗 → /api/graph 503、
+   feedback/gap disabled → 503。**どこを切っても startup が死なない。**
+3. **後方互換へのこだわり** — MCP `bidirectional` 既定 False、HTTP
+   `direction` 既定 `both`、generation `backend="auto"` 既定で v0.8.1
+   挙動を再現、`force_dummy` 互換 shim 維持。**呼び出し側を一切壊さない。**
+4. **spec_051 の hotfix 質が高い** — HIGH-1 (dim mismatch) を **startup
+   で fatal にする** 判断は正しい (silent fail の方が遥かに危険)。MID-3
+   の regex 偽陽性修正に **真陽性 regression test を明示的に追加** している
+   (`test_detect_no_info_sentence_end_wakarimasen_is_true`) — 細かいが
+   将来の "改善のつもりで真陽性を壊す" 事故を防ぐ。
+5. **テスト網羅性** — F1 14+2、F2 8+2、F3 12+3+4、F4 11+3、F5 6 と
+   各 spec で **unit + integration を必ず最低限揃えている**。frontend に
+   runner が無い (`graph-sidebar.test.tsx` は placeholder) のは欠点だが
+   API 層で同等を埋めている。
 
 ---
 
-## 7. 成功条件チェック
+## 3. v0.10 候補 (発見的に列挙)
 
-- [x] 5 spec × 4 軸の所見テーブル → §1
-- [x] 全体評価 (A/B/C) → A− (§0, §5)
-- [x] 新たな問題 0-5 件 → 5 件 (HIGH-1 / MID-3 / LOW-1) §2
-- [x] ポジティブ評価 0-5 件 → 5 件 §3
-- [x] v0.10 候補 → 8 件 §6
-- [x] ファイル変更 0 (result_050.md 以外) / commit 0 (review commit のみ後で作成)
-- [x] result_050.md に出力
+1. **データ保持ポリシー**: feedback / gap DB に `retention_days` + cron
+   housekeeping、`SELECT … VACUUM` ジョブ。Issue #2 と紐付け。
+2. **active learning ループの活用**: 現在 spec_047 / spec_048 は
+   "ログだけ"。次のステップは:
+   - 👎 が一定数集まった doc の score 自動低減 / BM25 weight 調整。
+   - gap report の上位 query から **LLM が ingest 提案** を生成
+     (frontmatter 草稿を `/api/ingest` 経由で save、人間 review 後 commit)。
+3. **`HttpUrl` validator + ingest token default-on**: Issue #1 と #5。
+4. **`~/.axis/` 配下に SQLite 集約**: 2-1 で挙げた配置整理。`AXIS_DATA_DIR`
+   env var で opt-in 移行。
+5. **MCP / HTTP の direction validation を統一**: Issue #4。
+6. **OllamaBackend / OllamaEmbedder の timeout & retry**: Issue #3。
+7. **`force_dummy` shim 撤去**: spec_045 で `DummyEmbedder` が登場した
+   ため、`GeminiEmbedder(force_dummy=True)` 互換コードは v0.10 で剥がせる。
+8. **Common `EventStore[T]` Protocol**: feedback と gap で 50% コード重複
+   ありで統合可能 — ただし優先度低。
+9. **forwardlinks/backlinks の sort key 選択**: GraphSidebar UI で
+   "in_degree 降順" / "title 順" の toggle を導入。
+10. **frontend test runner (vitest)**: `graph-sidebar.test.tsx` /
+    `citations.test.ts` が runner 待ちで動いていない。
 
-— end of review —
+---
+
+## 4. 結論
+
+**Overall Grade: A**  
+v0.9.0 (= v0.9.1 / spec_053 後) は **portfolio / ES に貼って恥ずかしくない
+品質**。F1–F5 の主要機能は Protocol 設計が一貫しており、spec_051 で
+sev:HIGH 級の bug は事前潰し済、後方互換も完璧。残る課題はいずれも
+LOW–MID で v0.10 で順次対処すれば十分。
+
+特筆すべきは **失敗時の graceful degradation の網羅性** と **後方互換へ
+のこだわり** — local-first OSS が長期 maintain される条件を満たしている。
+
+---
+
+*Generated by Claude Code (`dev-b`), spec_050. Read-only review — no
+source modifications, no commits to backend / frontend / mcp_server /
+evaluation directories.*
