@@ -301,3 +301,60 @@ def test_sqlite_has_parents_false_after_reset(
 
     store.reset()
     assert store.has_parents() is False
+
+
+# ---------------------------------------------------------------------------
+# spec_056: delete_doc — chunk-level upsert support for live ingest
+# ---------------------------------------------------------------------------
+
+
+def test_delete_doc_removes_children_and_parents(
+    tmp_path: Path, dummy_embedder: Embedder
+) -> None:
+    """add_chunks for two docs → delete one → only the other's chunks remain."""
+    from backend.src.chunker import chunk_markdown
+
+    store = VectorStore(path=tmp_path / "chroma")
+    p_a, c_a = chunk_markdown("doc_a", "## A\n\nalpha body text.", {"title": "A"})
+    p_b, c_b = chunk_markdown("doc_b", "## B\n\nbeta body text.", {"title": "B"})
+    store.add_chunks(p_a, c_a, dummy_embedder.embed_batch([c.text for c in c_a]))
+    store.add_chunks(p_b, c_b, dummy_embedder.embed_batch([c.text for c in c_b]))
+    total_before = store.count()
+    assert total_before == len(c_a) + len(c_b)
+
+    deleted = store.delete_doc("doc_a")
+
+    assert deleted == len(c_a)
+    assert store.count() == len(c_b)
+    # doc_a parents are gone; doc_b parents survive
+    fresh = VectorStore(path=tmp_path / "chroma")
+    fresh.load_parents()
+    assert all(p.doc_id == "doc_b" for p in fresh.parents.values())
+
+
+def test_delete_doc_noop_for_unknown_id(in_memory_store: VectorStore) -> None:
+    """delete_doc on an unknown id is safe (returns 0)."""
+    assert in_memory_store.delete_doc("never-existed") == 0
+
+
+def test_delete_doc_then_readd_no_duplicate_error(
+    tmp_path: Path, dummy_embedder: Embedder
+) -> None:
+    """delete + add_chunks for the same doc_id must NOT raise DuplicateIDError.
+
+    This is the upsert contract live_ingest depends on (spec_056). Without
+    delete_doc first, the second add_chunks would crash because parent_id /
+    child_id are deterministic from (doc_id, heading_slug).
+    """
+    from backend.src.chunker import chunk_markdown
+
+    store = VectorStore(path=tmp_path / "chroma")
+    body = "## H\n\nfirst body.\n"
+    parents, children = chunk_markdown("memo_x", body, {"title": "X"})
+    store.add_chunks(parents, children, dummy_embedder.embed_batch([c.text for c in children]))
+    first_count = store.count()
+
+    # Re-ingest the same doc (this would DuplicateIDError without delete first)
+    store.delete_doc("memo_x")
+    store.add_chunks(parents, children, dummy_embedder.embed_batch([c.text for c in children]))
+    assert store.count() == first_count  # not doubled
