@@ -2,6 +2,40 @@
 
 ## [Unreleased]
 
+### Day 53 (2026-05-21) — `/graph` GraphSidebar visibility fix (spec_053)
+
+v0.9.1 patch: the right-hand 320 px `GraphSidebar` on `/graph` was
+invisible after v0.9.0 — not even the placeholder rendered, though the
+canvas, click events, and `/api/graph/{id}/neighbors` all worked. Root
+cause was `react-force-graph-3d` defaulting its canvas to
+`window.innerWidth × window.innerHeight` (verified in
+`three-render-objects.mjs:175`), which forced the CSS Grid `1fr` column's
+`min-content` to the viewport width and pushed the 320 px sidebar past
+the `<main className="max-w-6xl">` ancestor, where `overflow-hidden`
+clipped it out of view. Two complementary fixes:
+
+- **`frontend/src/app/graph/page.tsx`** — replace `grid grid-cols-[1fr_320px]`
+  with `flex`; canvas column gets `min-w-0 flex-1`, sidebar gets a
+  `w-80 shrink-0` wrapper. Flexbox's explicit shrink/grow semantics
+  cancel the runaway from the oversized canvas; the sidebar can no longer
+  be squeezed off-screen.
+- **`frontend/src/components/Knowledge3DGraph.tsx`** — wrap `ForceGraph3D`
+  in an `absolute inset-0` div, observe it with `ResizeObserver`, and
+  pass explicit `width` / `height` props so the canvas matches its
+  column instead of the viewport. Fixes the underlying invariant, makes
+  the graph responsive to resize.
+- **`frontend/src/components/GraphSidebar.tsx`** — add `h-full` to both
+  aside branches so the wrapper height propagates (needed for the loaded
+  state's `overflow-y-auto` to work for long neighbor lists).
+- **tests**: no runtime change to data flow; the existing
+  `graph-sidebar.test.tsx` (documentation-only, no runner wired) and 426
+  backend tests remain green. `npm run build` + `tsc --noEmit` green.
+- **ADR-032** records the diagnosis (four hypotheses considered, A/B/D
+  falsified, C surface symptom), the decision (flexbox + measured
+  canvas), rejected alternatives (Tailwind safelist, hard-coded canvas
+  size, resize-observer dep), and guidelines for future arbitrary
+  Tailwind grid values alongside intrinsically-sized children.
+
 ### Day 52 (2026-05-21) — Gemini generation backend + `auto` fallback (spec_052)
 
 v0.9.1 patch: add `GeminiBackend` and a new `"auto"` mode so users with
