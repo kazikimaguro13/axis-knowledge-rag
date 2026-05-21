@@ -412,6 +412,7 @@ async def test_axis_ingest_memo_markdown(empty_knowledge_dir: Path):
     params = IngestInput(
         raw_text="これは MCP 経由の DUMMY ingest テスト用のメモ本文です。",
         knowledge_dir=str(empty_knowledge_dir),
+        live_ingest=False,
     )
     result = await srv.axis_ingest_memo(params)
     assert isinstance(result, str)
@@ -426,6 +427,7 @@ async def test_axis_ingest_memo_json(empty_knowledge_dir: Path):
         raw_text="JSON モードの DUMMY ingest テスト用のメモ本文サンプル。",
         knowledge_dir=str(empty_knowledge_dir),
         response_format=ResponseFormat.JSON,
+        live_ingest=False,
     )
     result = await srv.axis_ingest_memo(params)
     data = json.loads(result)
@@ -433,6 +435,7 @@ async def test_axis_ingest_memo_json(empty_knowledge_dir: Path):
     assert "rendered_md" in data
     assert data["is_dummy"] is True
     assert data["axes"]["category"] == "メモ"
+    assert data["indexed"] is False
 
 
 @pytest.mark.asyncio
@@ -442,6 +445,58 @@ async def test_axis_ingest_memo_input_validation():
     # min_length=20 should be enforced by Pydantic
     with pytest.raises(ValidationError):
         IngestInput(raw_text="short")
+
+
+# ---------------------------------------------------------------------------
+# spec_056: live_ingest backend integration + fallback
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_axis_ingest_memo_live_ingest_fallback_when_backend_down(
+    empty_knowledge_dir: Path, monkeypatch
+):
+    """live_ingest=True against an unreachable backend → indexed=false, markdown still returned."""
+    # Point at a port nothing should be listening on; the urllib call must
+    # fail and the tool must degrade gracefully.
+    params = IngestInput(
+        raw_text="バックエンド未起動フォールバックのテスト本文サンプル。",
+        knowledge_dir=str(empty_knowledge_dir),
+        response_format=ResponseFormat.JSON,
+        live_ingest=True,
+        backend_url="http://127.0.0.1:1",
+    )
+    result = await srv.axis_ingest_memo(params)
+    data = json.loads(result)
+    assert data["indexed"] is False
+    assert "rendered_md" in data
+    assert data["id"] == "doc_001"
+
+
+@pytest.mark.asyncio
+async def test_axis_ingest_memo_live_ingest_success_path(
+    empty_knowledge_dir: Path, monkeypatch
+):
+    """When the backend call succeeds (mocked), indexed=true is surfaced."""
+    captured: dict = {}
+
+    def _fake_call(md: str, url: str) -> dict:
+        captured["url"] = url
+        captured["md"] = md
+        return {"indexed": True, "parents": 3, "children": 7, "doc_id": "doc_001"}
+
+    monkeypatch.setattr(srv, "_live_ingest_via_backend", _fake_call)
+    params = IngestInput(
+        raw_text="バックエンド呼び出し成功時のテストメモ本文サンプル。",
+        knowledge_dir=str(empty_knowledge_dir),
+        response_format=ResponseFormat.JSON,
+        live_ingest=True,
+    )
+    result = await srv.axis_ingest_memo(params)
+    data = json.loads(result)
+    assert data["indexed"] is True
+    assert data["live_ingest"]["parents"] == 3
+    assert captured["url"].endswith("8000")  # default backend URL
 
 
 # ---------------------------------------------------------------------------

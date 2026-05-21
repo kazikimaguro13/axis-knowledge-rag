@@ -175,3 +175,18 @@ class IngestInput(_BaseInput):
     )
     max_tokens: int = Field(default=1500, ge=512, le=4096)
     response_format: ResponseFormat = Field(default=ResponseFormat.MARKDOWN)
+    # spec_056: live ingest opt-in. When true (default), the generated
+    # markdown is POSTed to the backend's /api/ingest/memo so the memo
+    # is searchable + visible in /api/graph immediately. If the backend
+    # is unreachable we fall back to returning the rendered markdown
+    # alone with ``indexed=false`` so the legacy "save and rebuild" flow
+    # still works.
+    live_ingest: bool = Field(default=True)
+    backend_url: str | None = Field(
+        default=None,
+        description=(
+            "Override the backend base URL. Defaults to env AXIS_BACKEND_URL "
+            "or http://127.0.0.1:8000."
+        ),
+        max_length=500,
+    )
