@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from backend.src.embedder import (
+    _GEMINI_BATCH_SIZE,
     EMBEDDING_DIM,
     DummyEmbedder,
     Embedder,
@@ -127,3 +128,98 @@ def test_ollama_embedder_embed_batch(monkeypatch: pytest.MonkeyPatch) -> None:
     out = e.embed_batch(["a", "b", "c"])
     assert len(out) == 3
     assert all(v == [0.0, 1.0] for v in out)
+
+
+# ---------------------------------------------------------------------------
+# spec_055: Gemini batched embed_content
+# ---------------------------------------------------------------------------
+
+
+def test_gemini_embed_batch_dummy_mode_count_and_dim() -> None:
+    """force_dummy=True: embed_batch returns one 768-dim vector per input,
+    in input order, equal to per-call embed() outputs."""
+    e = GeminiEmbedder(force_dummy=True)
+    texts = ["alpha", "beta", "gamma"]
+    out = e.embed_batch(texts)
+    assert len(out) == len(texts)
+    assert all(len(v) == EMBEDDING_DIM for v in out)
+    # Order + value parity with per-element embed()
+    expected = [e.embed(t) for t in texts]
+    assert out == expected
+
+
+def test_gemini_embed_batch_empty_input_returns_empty() -> None:
+    assert GeminiEmbedder(force_dummy=True).embed_batch([]) == []
+
+
+def test_gemini_embed_batch_calls_embed_content_with_list() -> None:
+    """When not in dummy mode, embed_batch must issue ONE embed_content call
+    per sub-batch with content=list[str] — not N single-string calls. This
+    is the perf fix: 4694 child embeddings drop from ~60 min to a few mins."""
+    fake_genai = MagicMock()
+    fake_genai.embed_content.return_value = {
+        "embedding": [[0.1] * EMBEDDING_DIM, [0.2] * EMBEDDING_DIM, [0.3] * EMBEDDING_DIM]
+    }
+    e = GeminiEmbedder(force_dummy=True)
+    # Manually flip to "live" mode with the mocked client.
+    e._use_dummy = False
+    e._genai = fake_genai
+
+    out = e.embed_batch(["x", "y", "z"])
+
+    assert fake_genai.embed_content.call_count == 1
+    kwargs = fake_genai.embed_content.call_args.kwargs
+    assert kwargs["content"] == ["x", "y", "z"]
+    assert kwargs["output_dimensionality"] == EMBEDDING_DIM
+    assert len(out) == 3
+    assert out[0] == [0.1] * EMBEDDING_DIM
+
+
+def test_gemini_embed_batch_splits_into_sub_batches() -> None:
+    """Inputs larger than _GEMINI_BATCH_SIZE must be split — verified by
+    counting embed_content calls and total vectors returned."""
+    n = _GEMINI_BATCH_SIZE * 2 + 5  # 3 sub-batches: 100 + 100 + 5
+
+    def fake_embed_content(**kwargs: object) -> dict:
+        sub = kwargs["content"]
+        assert isinstance(sub, list)
+        return {"embedding": [[0.0] * EMBEDDING_DIM for _ in sub]}
+
+    fake_genai = MagicMock()
+    fake_genai.embed_content.side_effect = fake_embed_content
+    e = GeminiEmbedder(force_dummy=True)
+    e._use_dummy = False
+    e._genai = fake_genai
+
+    out = e.embed_batch([f"t{i}" for i in range(n)])
+
+    assert len(out) == n
+    assert fake_genai.embed_content.call_count == 3
+    # Sub-batch sizes are 100, 100, 5
+    sizes = [len(c.kwargs["content"]) for c in fake_genai.embed_content.call_args_list]
+    assert sizes == [_GEMINI_BATCH_SIZE, _GEMINI_BATCH_SIZE, 5]
+
+
+def test_gemini_embed_batch_retries_on_transient_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Sub-batch failures retry with backoff and succeed on a later attempt."""
+    monkeypatch.setattr("backend.src.embedder.time.sleep", lambda _s: None)
+
+    calls = {"n": 0}
+
+    def flaky(**kwargs: object) -> dict:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("transient 503")
+        return {"embedding": [[0.5] * EMBEDDING_DIM for _ in kwargs["content"]]}
+
+    fake_genai = MagicMock()
+    fake_genai.embed_content.side_effect = flaky
+    e = GeminiEmbedder(force_dummy=True)
+    e._use_dummy = False
+    e._genai = fake_genai
+
+    out = e.embed_batch(["a", "b"])
+    assert len(out) == 2
+    assert calls["n"] == 2  # one failure + one success
