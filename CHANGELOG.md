@@ -2,6 +2,76 @@
 
 ## [Unreleased]
 
+### Day 56 (2026-05-21) — Live ingest + dev-history categories (spec_056)
+
+v0.9.4: adding a memo previously needed three steps — drop the `.md` into
+`knowledge_dir`, run `python -m scripts.build_index <dir> --rebuild`
+(re-chunks + re-embeds every doc and drops the Chroma collection), then
+restart the FastAPI backend so it re-opens the collection. This release
+collapses that to a single API call: post the memo, search it 1 second
+later, no rebuild, no restart.
+
+- **`backend/src/vector_store.py`** — new `VectorStore.delete_doc(doc_id)`
+  removes every child chunk (matched on the `doc_id` Chroma metadata)
+  plus the corresponding parents from the SQLite sidecar. Idempotent
+  upsert is what makes live ingest re-callable: `parent_id` / `child_id`
+  are deterministic from `(doc_id, heading_slug)` (v0.9.3, spec_055), so
+  a second `add_chunks` without a prior delete would crash with
+  `DuplicateIDError`. Unknown ids are a no-op.
+- **`backend/src/live_ingest.py`** — new `ingest_file(path, store=, embedder=, normalizer=)`
+  helper: `load_document` → `chunk_markdown` → `embedder.embed_batch`
+  (v0.9.3 batched Gemini path) → `delete_doc` → `add_chunks`. Single
+  file, ~1 second for a typical memo. Used by both API endpoints below.
+- **`backend/src/api.py`** — new `POST /api/ingest/memo` accepts either
+  `{"markdown": "<full YAML+md>"}` (writes `<knowledge_dir>/<frontmatter.id>.md`)
+  or `{"path": "<relative path under knowledge_dir>"}` (already on disk),
+  runs live ingest against the running `VectorStore`, then rebuilds the
+  in-memory `KnowledgeGraph` via `build_default_graph(knowledge_dir)`.
+  Existing `POST /api/ingest` (browser extension) also live-indexes the
+  page after `save_web_page`, so captured pages are immediately
+  searchable. Lifespan now keeps `_state["store"]` /
+  `_state["normalizer"]` / `_state["retrieval_cfg"]` so endpoints share
+  the engine's handles. `X-Axis-Token` gate is honoured on both
+  endpoints. Path-traversal guard rejects `..` escapes.
+- **`backend/src/schemas.py`** — new `MemoIngestRequest` /
+  `MemoIngestResponse`; `IngestResponse` gains optional `indexed` /
+  `parents` / `children` fields (default-safe for existing browser
+  extension callers).
+- **`mcp_server/server.py`** — `axis_ingest_memo` now POSTs the rendered
+  markdown to the backend's `/api/ingest/memo` so memos are searchable
+  via MCP immediately. Backend URL: `params.backend_url` >
+  `$AXIS_BACKEND_URL` > `http://127.0.0.1:8000`. When the backend is
+  unreachable, the tool degrades to the legacy "return markdown only,
+  `indexed=false`" behaviour so the user can still copy the file
+  manually + `build_index --rebuild` later. Forwards `AXIS_INGEST_TOKEN`
+  from env when set.
+- **`mcp_server/schemas.py`** — `IngestInput` gains `live_ingest`
+  (default `True`) and optional `backend_url`.
+- **`config.yml`** — `category` enum extends from 7 to 11 values
+  (`spec`, `result`, `adr`, `changelog` added) so the dev-history memos
+  under `~/axis-knowledge/` (the project's own spec lifecycle) appear
+  in the Web UI axis filter. `loader.py` does not strictly validate the
+  enum, so memos with arbitrary categories keep working — this list
+  drives `/api/axes` only.
+- **`backend/tests/test_vector_store.py`** — new tests for
+  `delete_doc`: removes only matching chunks / parents, no-op for
+  unknown id, delete + re-add does not raise `DuplicateIDError` and
+  does not double the row count.
+- **`backend/tests/test_live_ingest.py`** — new module: ingests a memo
+  end-to-end, asserts counts are stable across re-ingest, asserts an
+  edited body actually replaces the stored parent text.
+- **`backend/tests/test_api.py`** — new `/api/ingest/memo` coverage:
+  markdown mode + immediate search hit, graph node appearing, re-ingest
+  upsert, path mode, path-traversal 400, missing-id 400, missing-body
+  400, web-page `/api/ingest` indexes immediately.
+- **`mcp_server/tests/test_server.py`** — `live_ingest=False` keeps the
+  legacy markdown-only behaviour, fallback when the backend is
+  unreachable returns `indexed=false`, mocked success path surfaces
+  `indexed=true`.
+- **migration**: none. Existing indices are untouched; `delete_doc`
+  only fires when you call live ingest. `/api/ingest` response gains
+  `indexed`/`parents`/`children` (additive — old clients ignore them).
+
 ### Day 55 (2026-05-21) — Index build perf + JP heading parent_id collision fix (spec_055)
 
 v0.9.3 patch: building an index over the project's own dev history
