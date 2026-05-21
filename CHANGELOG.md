@@ -2,6 +2,50 @@
 
 ## [Unreleased]
 
+### Day 54 (2026-05-21) — Test fixtures separated from demo corpus (spec_054)
+
+v0.9.2 patch: the directory `examples/knowledge/` was triple-booked as
+the OSS demo corpus, the test fixture, and the user's personal notes.
+On 2026-05-21 a developer swapped in their own notes and watched four
+`test_api.py` neighbors tests fail with `doc_001` not found, because the
+suite was reading IDs from whatever happened to be in `examples/knowledge/`
+at the time. This change splits those three roles apart so swapping the
+production corpus can never break the suite again.
+
+- **`backend/tests/fixtures/knowledge/`** — new git-tracked copy of the
+  10-file demo corpus (`01-rag-patterns.md` … `10-future-roadmap.md`).
+  This is what the test suite reads — neighbor / graph / category
+  assertions are pinned to these IDs. `examples/knowledge/` keeps its
+  own copy untouched, so the OSS quick-start still works.
+- **`backend/tests/conftest.py`** — adds a `TEST_KNOWLEDGE_DIR`
+  constant and an autouse session-scoped fixture that sets
+  `AXIS_KNOWLEDGE_DIR` to the fixture path before the FastAPI lifespan
+  runs. Every `TestClient(app)` now builds its graph from
+  `fixtures/knowledge/` regardless of what's in `examples/knowledge/`.
+- **`backend/src/config.py`** — `load_app_config()` honours a new
+  `AXIS_KNOWLEDGE_DIR` env var that overrides `graph.knowledge_dir` after
+  YAML load + `EVAL_OVERRIDE_FLAG` are applied. Unset → existing
+  `config.yml` value wins (default `./examples/knowledge`), so behaviour
+  is unchanged for users who never set the env var.
+- **`config.yml`** — comment on `graph.knowledge_dir` now points readers
+  at `AXIS_KNOWLEDGE_DIR` for personal corpora.
+- **`docs/configuration.md`** — new "Knowledge directory layout" section
+  documenting the 3-way split (demo / fixture / personal), override
+  resolution order, and an `AXIS_KNOWLEDGE_DIR` cookbook.
+- **`docs/deployment.md`** — new "Personal Knowledge Directory" section
+  showing the recommended `~/axis-knowledge/` setup + indexer + uvicorn
+  flow.
+- **`README.md`** — Quickstart now mentions `AXIS_KNOWLEDGE_DIR` for
+  personal use.
+- **tests**: `grep -rn 'examples/knowledge' backend/tests/` now matches
+  only conftest doc-strings (no real code coupling). The 438 backend
+  tests stay green; ruff clean.
+- **migration**: none. Default config still points at
+  `./examples/knowledge`. If you've been storing personal notes in
+  `examples/knowledge/`, move them to `~/axis-knowledge/` and `export
+  AXIS_KNOWLEDGE_DIR=~/axis-knowledge` — both the indexer and API will
+  follow.
+
 ### Day 53 (2026-05-21) — `/graph` GraphSidebar visibility fix (spec_053)
 
 v0.9.1 patch: the right-hand 320 px `GraphSidebar` on `/graph` was
