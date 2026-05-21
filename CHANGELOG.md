@@ -2,6 +2,45 @@
 
 ## [Unreleased]
 
+### Day 55 (2026-05-21) — Index build perf + JP heading parent_id collision fix (spec_055)
+
+v0.9.3 patch: building an index over the project's own dev history
+(`~/axis-knowledge/`, 104 docs / 862 parents / 4694 children) on
+2026-05-21 surfaced two distinct problems that the demo / fixture
+corpus never triggered. This release fixes both.
+
+- **`backend/src/embedder.py`** — `GeminiEmbedder.embed_batch` was a
+  "fake" batch (`[self.embed(t) for t in texts]`), one HTTP round-trip
+  per chunk. 4694 child embeddings took ~60 min. Replaced with a real
+  batched call: `embed_content(content=list[str])` returns
+  `BatchEmbeddingDict`, one request per ≤100-item sub-batch. Light
+  exponential backoff (2 retries) wraps each sub-batch. `embed()`,
+  `DummyEmbedder`, and `OllamaEmbedder` are untouched — Ollama's
+  embeddings endpoint is single-prompt by design.
+- **`backend/src/chunker.py`** — `_make_parent_id` now treats slugs
+  with no ASCII `[a-z]` letter (e.g. `## 1. 目的` folding to `"1"`,
+  `## 2. 制約` to `"2"`) as "weak" and falls back to an
+  NFKC + md5-hex(8) hash of the title. Two `## N. xxx` H2s that
+  previously collided on the residue `"N"` → identical `parent_id` →
+  `DuplicateIDError` in Chroma now stay distinct. ASCII-strong slugs
+  (`## RAG Patterns` → `rag-patterns`) are kept verbatim, so demo /
+  fixture parent_ids are byte-identical to v0.9.2. A final dedup pass
+  in `chunk_markdown` suffixes `-2` / `-3` ... to any remaining
+  collisions (e.g. the same JP heading text appearing twice in one
+  doc), as a safety net.
+- **`backend/tests/test_chunker.py`** — JP H2 uniqueness regression
+  (`## 1. 目的` / `## 2. 制約` / `## 3. ...` + duplicate `## 補足`
+  pair → all parent / child IDs unique), JP md5 slug shape assertion,
+  and an ASCII backwards-compat assertion (`rag-patterns` etc.
+  unchanged).
+- **`backend/tests/test_embedder.py`** — dummy-mode batch parity with
+  `embed()`, empty-input → `[]`, sub-batch split at `_GEMINI_BATCH_SIZE`
+  (100), and a transient-failure retry path.
+- **migration**: none. Existing indices built against ASCII-only
+  corpora keep their parent_ids. To recover from a prior
+  `DuplicateIDError` on a JP corpus, just re-run
+  `python -m scripts.build_index <dir> --rebuild`.
+
 ### Day 54 (2026-05-21) — Test fixtures separated from demo corpus (spec_054)
 
 v0.9.2 patch: the directory `examples/knowledge/` was triple-booked as
