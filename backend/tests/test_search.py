@@ -540,3 +540,70 @@ def test_search_graph_expand_max_neighbors(
     expanded = engine._expand_with_graph([seed], hop=1, max_neighbors=2)
     neighbours_added = [r for r in expanded if r.id != "hub"]
     assert len(neighbours_added) == 2
+
+
+# ---------------------------------------------------------------------------
+# spec_051: dim mismatch / axis-only embedding dim
+# ---------------------------------------------------------------------------
+
+
+class _DummyEmbedder1024:
+    """Test double — reports dim=1024 instead of the default 768."""
+
+    @property
+    def is_dummy(self) -> bool:
+        return True
+
+    @property
+    def dim(self) -> int:
+        return 1024
+
+    def embed(self, text: str) -> list[float]:
+        return [0.0] * 1024
+
+    def embed_batch(self, texts):
+        return [self.embed(t) for t in texts]
+
+
+def test_axis_only_query_uses_embedder_dim(
+    in_memory_store: VectorStore, dummy_embedder: Embedder, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """spec_051 HIGH-1: axis-only path must build the zero vector at
+    ``embedder.dim``, not the legacy hardcoded 768."""
+    # Seed the store with one doc embedded under the default 768-dim
+    # embedder so the count() short-circuit doesn't bypass the call.
+    docs = [_make_doc("d1", "技術記事", "body")]
+    embeddings = dummy_embedder.embed_batch([d.body for d in docs])
+    in_memory_store.upsert_many(docs, embeddings)
+
+    fake_emb = _DummyEmbedder1024()
+    captured: dict[str, object] = {}
+
+    def fake_query(embedding, *, n_results, where=None):
+        captured["len"] = len(embedding)
+        return {"ids": [[]], "distances": [[]], "metadatas": [[]], "documents": [[]]}
+
+    monkeypatch.setattr(in_memory_store, "query", fake_query)
+    engine = SearchEngine(in_memory_store, fake_emb)
+    engine.search(None, filters={"category": "技術記事"}, top_k=5)
+    assert captured["len"] == 1024
+
+
+def test_search_with_mismatched_dim_raises_clear_error(
+    in_memory_store: VectorStore, dummy_embedder: Embedder
+) -> None:
+    """probe_dim returns the indexed dim; a follow-up query with the
+    *wrong* dim must fail loudly (Chroma's native error is fine — the
+    lifespan check is what catches the typical config-swap case)."""
+    docs = [_make_doc("d1", "技術記事", "body")]
+    embeddings = dummy_embedder.embed_batch([d.body for d in docs])
+    in_memory_store.upsert_many(docs, embeddings)
+
+    # probe_dim recovers the dim the store was built with.
+    assert in_memory_store.probe_dim() == dummy_embedder.dim
+
+    # Querying with a mismatched-dim embedding raises (Chroma surfaces
+    # an InvalidDimensionException-like error). The exact class isn't
+    # what the test cares about — just that it's not a silent crash.
+    with pytest.raises(Exception, match=r"(?i)dimension|shape|expected"):
+        in_memory_store.query([0.0] * (dummy_embedder.dim + 16), n_results=1)

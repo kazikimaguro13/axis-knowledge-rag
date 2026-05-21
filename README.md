@@ -50,6 +50,30 @@ docker compose up
 
 ---
 
+## 🔒 Security note: `/api/ingest` is unauthenticated by default
+
+`POST /api/ingest` (Chrome 拡張から呼ばれるエンドポイント) は v0.9 時点で
+**デフォルトで認証なし**です。`127.0.0.1` (= ローカル開発) で動かす限りは
+これで問題ありませんが、**LAN 越し / 外部公開する場合は必ず**
+`AXIS_INGEST_TOKEN` を設定してください。
+
+```bash
+# 1. トークンを生成して環境変数に入れる (uvicorn を起動するシェル)
+export AXIS_INGEST_TOKEN="$(openssl rand -hex 32)"
+uvicorn backend.src.api:app --host 127.0.0.1 --port 8000
+
+# 2. ブラウザ拡張の Settings に同じトークンを貼り、X-Axis-Token ヘッダで送る
+curl -X POST http://localhost:8000/api/ingest \
+  -H "Content-Type: application/json" \
+  -H "X-Axis-Token: $AXIS_INGEST_TOKEN" \
+  -d '{"url":"https://example.com","title":"t","body":"b"}'
+```
+
+`AXIS_INGEST_TOKEN` が未設定の場合は v0.8 互換 (無認証許容)。
+詳細・外部公開時の追加注意点は [`docs/deployment.md`](docs/deployment.md#security--ingest-token-spec_051) を参照。
+
+---
+
 ## 🤖 メモを自動 YAML 化
 
 既存メモ (Slack 抜粋 / 議事録 / Apple Notes / プレーン Markdown など) を

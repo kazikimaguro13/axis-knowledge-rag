@@ -15,7 +15,7 @@ def get_judge_llm() -> BaseChatModel:
     if not api_key:
         raise RuntimeError("GEMINI_API_KEY not set")
     return ChatGoogleGenerativeAI(
-        model="gemini-1.5-flash",
+        model="gemini-2.5-flash",
         temperature=0.0,
         google_api_key=api_key,
     )
@@ -26,6 +26,6 @@ def get_judge_embeddings():
     from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
     return GoogleGenerativeAIEmbeddings(
-        model="models/text-embedding-004",
+        model="models/gemini-embedding-001",
         google_api_key=os.environ["GEMINI_API_KEY"],
     )

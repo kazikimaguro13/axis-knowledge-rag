@@ -33,9 +33,13 @@ export default function GraphPage() {
       .catch((e) => setError(String(e)));
   }, [filters]);
 
+  // Flexbox (not grid) + min-w-0 on the canvas column: react-force-graph-3d
+  // defaults its canvas to window.innerWidth, which forces a grid 1fr column's
+  // min-content to the viewport width and pushes a sized sidebar off-screen.
+  // See ADR-032.
   return (
-    <div className="grid h-[calc(100vh-120px)] grid-cols-[1fr_320px] overflow-hidden rounded-lg border bg-white">
-      <div className="relative bg-[#0a0a0a]">
+    <div className="flex h-[calc(100vh-120px)] overflow-hidden rounded-lg border bg-white">
+      <div className="relative min-w-0 flex-1 bg-[#0a0a0a]">
         <GraphFilterBar onChange={setFilters} stats={graphData?.stats} />
         {error && (
           <div className="absolute inset-0 flex items-center justify-center text-sm text-red-400">
@@ -55,7 +59,9 @@ export default function GraphPage() {
           </div>
         )}
       </div>
-      <GraphSidebar docId={selectedNode} onClose={() => setSelectedNode(null)} />
+      <div className="w-80 shrink-0">
+        <GraphSidebar docId={selectedNode} onClose={() => setSelectedNode(null)} />
+      </div>
     </div>
   );
 }

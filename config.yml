@@ -1,18 +1,27 @@
 axes:
   - name: category
     type: enum
-    values: ["技術記事", "メモ", "議事録", "ToDo"]
+    values: ["就活", "業務", "学習", "議事録", "ToDo", "メモ", "技術記事"]
     required: true
+
   - name: topic
     type: string
     required: true
+
+  - name: status
+    type: enum
+    values: ["進行中", "完了", "保留", "アーカイブ"]
+    required: false
+
   - name: level
     type: enum
     values: ["初級", "中級", "上級"]
     required: false
-  - name: author
+
+  - name: client
     type: string
     required: false
+
   - name: year
     type: integer
     required: false
@@ -89,13 +98,16 @@ graph:
   knowledge_dir: "./examples/knowledge"
 
 # spec_045: Ollama / Llama.cpp full on-prem backend selection.
-# Defaults preserve v0.8.1 behaviour (Gemini for embedding, Claude for
-# generation). Flip the `backend` keys to "ollama" to run fully on-prem;
-# the embedder switch is index-incompatible (bge-m3 = 1024 dim vs Gemini =
-# 768 dim) so run `python -m scripts.build_index ... --rebuild` after.
+# spec_052 (v0.9.1): generation.backend now defaults to "auto" → Claude
+# when ANTHROPIC_API_KEY is set, Gemini when only GEMINI_API_KEY is set,
+# DUMMY otherwise. Users without an Anthropic key still get real RAG
+# answers from the Gemini key they already had for the embedder.
+# Flip the `backend` keys to "ollama" to run fully on-prem; the embedder
+# switch is index-incompatible (bge-m3 = 1024 dim vs Gemini = 768 dim) so
+# run `python -m scripts.build_index ... --rebuild` after.
 #
 #   embedder.backend:    "gemini" (default) | "ollama" | "dummy"
-#   generation.backend:  "claude" (default) | "ollama" | "dummy"
+#   generation.backend:  "auto" (default) | "claude" | "gemini" | "ollama" | "dummy"
 #
 # Ollama itself: `docker compose --profile ollama up -d ollama` and then
 # `docker exec axis-ollama ollama pull <model>` (see docs/deployment.md).
@@ -106,7 +118,9 @@ embedder:
     url: "http://localhost:11434"
 
 generation:
-  backend: "claude"
+  backend: "auto"                    # auto | claude | gemini | ollama | dummy
+  gemini:
+    model: "gemini-2.5-flash"        # used by backend="gemini" or auto-fallback
   ollama:
     model: "llama3"                  # try "llama3:70b" / "qwen2.5" / etc.
     url: "http://localhost:11434"

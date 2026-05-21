@@ -36,7 +36,7 @@ export function GraphSidebar({ docId, onClose }: Props) {
 
   if (!docId) {
     return (
-      <aside className="border-l-2 border-slate-200 bg-white p-4 text-sm text-slate-500 shadow-sm">
+      <aside className="h-full border-l-2 border-slate-200 bg-white p-4 text-sm text-slate-500 shadow-sm">
         <div className="flex flex-col items-start gap-2">
           <span className="text-base">🕸️</span>
           <p>
@@ -52,7 +52,7 @@ export function GraphSidebar({ docId, onClose }: Props) {
   }
 
   return (
-    <aside className="overflow-y-auto border-l-2 border-slate-200 bg-white p-4 text-sm shadow-sm">
+    <aside className="h-full overflow-y-auto border-l-2 border-slate-200 bg-white p-4 text-sm shadow-sm">
       <button
         onClick={onClose}
         className="mb-2 text-xs text-slate-500 hover:underline"

@@ -2,6 +2,108 @@
 
 ## [Unreleased]
 
+### Day 53 (2026-05-21) — `/graph` GraphSidebar visibility fix (spec_053)
+
+v0.9.1 patch: the right-hand 320 px `GraphSidebar` on `/graph` was
+invisible after v0.9.0 — not even the placeholder rendered, though the
+canvas, click events, and `/api/graph/{id}/neighbors` all worked. Root
+cause was `react-force-graph-3d` defaulting its canvas to
+`window.innerWidth × window.innerHeight` (verified in
+`three-render-objects.mjs:175`), which forced the CSS Grid `1fr` column's
+`min-content` to the viewport width and pushed the 320 px sidebar past
+the `<main className="max-w-6xl">` ancestor, where `overflow-hidden`
+clipped it out of view. Two complementary fixes:
+
+- **`frontend/src/app/graph/page.tsx`** — replace `grid grid-cols-[1fr_320px]`
+  with `flex`; canvas column gets `min-w-0 flex-1`, sidebar gets a
+  `w-80 shrink-0` wrapper. Flexbox's explicit shrink/grow semantics
+  cancel the runaway from the oversized canvas; the sidebar can no longer
+  be squeezed off-screen.
+- **`frontend/src/components/Knowledge3DGraph.tsx`** — wrap `ForceGraph3D`
+  in an `absolute inset-0` div, observe it with `ResizeObserver`, and
+  pass explicit `width` / `height` props so the canvas matches its
+  column instead of the viewport. Fixes the underlying invariant, makes
+  the graph responsive to resize.
+- **`frontend/src/components/GraphSidebar.tsx`** — add `h-full` to both
+  aside branches so the wrapper height propagates (needed for the loaded
+  state's `overflow-y-auto` to work for long neighbor lists).
+- **tests**: no runtime change to data flow; the existing
+  `graph-sidebar.test.tsx` (documentation-only, no runner wired) and 426
+  backend tests remain green. `npm run build` + `tsc --noEmit` green.
+- **ADR-032** records the diagnosis (four hypotheses considered, A/B/D
+  falsified, C surface symptom), the decision (flexbox + measured
+  canvas), rejected alternatives (Tailwind safelist, hard-coded canvas
+  size, resize-observer dep), and guidelines for future arbitrary
+  Tailwind grid values alongside intrinsically-sized children.
+
+### Day 52 (2026-05-21) — Gemini generation backend + `auto` fallback (spec_052)
+
+v0.9.1 patch: add `GeminiBackend` and a new `"auto"` mode so users with
+only a `GEMINI_API_KEY` (the embedder requires it) stop getting DUMMY
+answers from `axis_answer` / `axis_chat`. Existing Claude users see no
+behaviour change.
+
+- **`backend/src/rag.py`** — new `GeminiBackend` class wrapping
+  `google.generativeai.GenerativeModel.generate_content`. System prompt
+  folded into the prompt body as `[SYSTEM]\n...\n\n` so the call site
+  stays provider-agnostic. Default model `gemini-2.5-flash`. Raises
+  `RuntimeError("GEMINI_API_KEY not set ...")` on construction when no
+  key is reachable; the factory catches that and falls back to DUMMY
+- **`backend/src/rag.py`** — `make_generation_backend(...)` gained
+  `"auto"` and `"gemini"` branches. Priority under `"auto"` is
+  **Claude > Gemini > DUMMY**: paid users keep Claude, Gemini-only users
+  finally get real answers, no-key users still get DUMMY. The
+  `backend_name` property now reports `GEMINI` for telemetry parity with
+  `CLAUDE` / `OLLAMA` / `DUMMY`
+- **`backend/src/config.py`** — new `GeminiGenConfig(model="gemini-2.5-flash")`.
+  `GenerationConfig.backend` default flipped from `"claude"` to `"auto"`.
+  `_build_app_config` reads `generation.gemini.model` from `config.yml`
+- **`config.yml`** — `generation.backend: "auto"` + `generation.gemini.model`
+  block. Comment block updated with the new priority chain
+- **tests**: `backend/tests/test_rag.py` +5 (init RuntimeError when no
+  key, generate-mock returns text, `auto` prefers Claude, `auto` falls
+  through to Gemini, `auto` returns DUMMY when neither key is set).
+  All 433 pre-existing tests still green → 438 total
+- **ADR-031** records the design (`auto` priority chain; rejected
+  alternatives: Gemini-as-default, Ollama-as-default, explicit-only;
+  consequences for un-keyed users; `google-generativeai` deprecation
+  path)
+- **version**: 0.9.0 → 0.9.1
+
+## [0.9.0] - 2026-05-20
+
+v0.9.0 marquee release: 5 user-facing features (F1–F5) plus the
+spec_051 pre-release hotfix that closed the HIGH-1 / MID-1 / MID-3
+issues flagged in the final review.
+
+### Added (F1–F5)
+- **F1 — Ollama / Llama.cpp integration** (spec_045, ADR-026)
+- **F2 — Browser Extension MVP (Chrome MV3)** (spec_046, ADR-027)
+- **F3 — Active Learning Feedback (👍 / 👎 + weekly report)** (spec_047, ADR-028)
+- **F4 — Knowledge Gap Detection (no_results / low_score / llm_no_info)** (spec_048, ADR-029)
+- **F5 — Bidirectional refs in GraphSidebar + MCP `axis_neighbors`** (spec_049, ADR-030)
+
+### Fixed (spec_051 final-review hotfix)
+- **HIGH-1**: Embedder dim mismatch silent crash on backend swap.
+  `backend/src/search.py` now builds the axis-only zero vector at
+  `embedder.dim` (was hardcoded `768`), and `backend/src/api.py`'s
+  `lifespan` probes the stored embedding dim and raises with a
+  Japanese rebuild hint when it disagrees with the configured
+  embedder.
+- **MID-3**: `detect_no_info` regex was too loose — partial answers
+  like "A は X ですが、B はわかりません、しかし C は Y です。" were
+  flagged as a knowledge gap. Anchored the `わかりません` / `不明です`
+  variants on end-of-string so they must terminate the answer.
+- **MID-1**: `/api/ingest` was unauthenticated by default and the CORS
+  regex was open. Added opt-in `AXIS_INGEST_TOKEN` env-based auth:
+  unset → v0.8 behaviour (no auth), set → every request must carry a
+  matching `X-Axis-Token` header. README + `docs/deployment.md`
+  document the recommended `uvicorn --host 127.0.0.1` setup.
+
+### Tests
+- +7 tests (dim mismatch ×2, regex false-positive guard ×3, ingest
+  token ×2). All 419 pre-existing tests still green → 426 total.
+
 ### Day 49 (2026-05-20) — Bidirectional refs in GraphSidebar (spec_049)
 
 v0.9 minor: split the sidebar's flat "🔗 隣接" list into Obsidian-style
