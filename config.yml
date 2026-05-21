@@ -1,7 +1,7 @@
 axes:
   - name: category
     type: enum
-    values: ["就活", "業務", "学習", "議事録", "ToDo", "メモ"]
+    values: ["就活", "業務", "学習", "議事録", "ToDo", "メモ", "技術記事"]
     required: true
 
   - name: topic
