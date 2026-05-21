@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import time
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
@@ -26,6 +27,9 @@ logger = logging.getLogger(__name__)
 
 EMBEDDING_DIM = 768  # Gemini text-embedding-004 + DummyEmbedder default
 _GEMINI_MODEL = "gemini-embedding-001"  # text-embedding-004 was retired from v1beta API (2026-05)
+# Gemini embed_content accepts a list of strings. Spec_055 measured ~100 items
+# per request as the safe upper bound; larger batches start returning 400s.
+_GEMINI_BATCH_SIZE = 100
 
 
 # ---------------------------------------------------------------------------
@@ -135,7 +139,51 @@ class GeminiEmbedder:
         return list(result["embedding"])
 
     def embed_batch(self, texts: Sequence[str]) -> list[list[float]]:
-        return [self.embed(t) for t in texts]
+        items = list(texts)
+        if not items:
+            return []
+        if self._use_dummy:
+            return [_dummy_embedding(t) for t in items]
+        out: list[list[float]] = []
+        for i in range(0, len(items), _GEMINI_BATCH_SIZE):
+            sub = items[i : i + _GEMINI_BATCH_SIZE]
+            embeddings = self._embed_sub_with_retry(sub)
+            out.extend(list(v) for v in embeddings)
+        return out
+
+    def _embed_sub_with_retry(
+        self, sub: list[str], max_retries: int = 2
+    ) -> list[list[float]]:
+        """Call embed_content on a sub-batch with light exponential backoff.
+
+        Returns the raw list-of-vectors. ``content`` is a list so the API
+        returns ``BatchEmbeddingDict``: ``result["embedding"]`` is
+        ``list[list[float]]``, one vector per input in the same order.
+        """
+        last_exc: Exception | None = None
+        for attempt in range(max_retries + 1):
+            try:
+                result = self._genai.embed_content(
+                    model=_GEMINI_MODEL,
+                    content=sub,
+                    output_dimensionality=self.DIM,
+                )
+                return result["embedding"]
+            except Exception as e:  # noqa: BLE001 — retry transient failures
+                last_exc = e
+                if attempt >= max_retries:
+                    break
+                delay = 0.5 * (2**attempt)
+                logger.warning(
+                    "Gemini embed_content batch failed (attempt %d/%d): %s — retrying in %.1fs",
+                    attempt + 1,
+                    max_retries + 1,
+                    e,
+                    delay,
+                )
+                time.sleep(delay)
+        assert last_exc is not None
+        raise last_exc
 
 
 # ---------------------------------------------------------------------------
