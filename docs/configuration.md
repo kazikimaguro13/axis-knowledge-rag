@@ -93,7 +93,36 @@ GraphRAG + knowledge-graph settings (spec_040).
 | `default_hop` | int | `1` | Default hop depth for neighbor queries. |
 | `max_neighbors_per_query` | int | `20` | Cap on neighbors returned per query. |
 | `expand_on_search` | bool | `false` | Automatically expand search results with 1-hop graph neighbors. |
-| `knowledge_dir` | string | `"./examples/knowledge"` | Directory scanned at startup to build the graph. |
+| `knowledge_dir` | string | `"./examples/knowledge"` | Directory scanned at startup to build the graph (default OSS demo corpus). Override per-environment via the `AXIS_KNOWLEDGE_DIR` env var — see below. |
+
+### Knowledge directory layout (spec_054)
+
+The project keeps the three roles of "Markdown files on disk" deliberately
+separate so swapping in your personal corpus never breaks the test suite:
+
+| Directory | Role | Tracked by git |
+|-----------|------|----------------|
+| `examples/knowledge/` | OSS demo corpus shipped with the repo; first-run experience for new users. | yes |
+| `backend/tests/fixtures/knowledge/` | Test fixture — pytest pins `graph.knowledge_dir` here via an autouse `conftest.py` fixture so neighbor / graph assertions stay stable. | yes |
+| `~/axis-knowledge/` (suggested) | Your personal / production notes. Lives outside the repo and is selected via `AXIS_KNOWLEDGE_DIR` at runtime. | no (per-machine) |
+
+**Override resolution order** (highest priority first):
+
+1. `AXIS_KNOWLEDGE_DIR` environment variable
+2. `graph.knowledge_dir` in `config.yml`
+3. Built-in default: `./examples/knowledge`
+
+```bash
+# Point the API at your own corpus without editing config.yml:
+export AXIS_KNOWLEDGE_DIR=~/axis-knowledge
+PYTHONPATH=. python3 -m uvicorn backend.src.api:app
+
+# Same env var feeds the indexer:
+PYTHONPATH=. python3 -m scripts.build_index "$AXIS_KNOWLEDGE_DIR" --rebuild
+```
+
+The default config is unchanged, so the repo still works end-to-end out of
+the box (OSS demo path); the env var is purely additive.
 
 ---
 
